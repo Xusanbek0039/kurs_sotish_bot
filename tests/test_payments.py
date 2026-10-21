@@ -1,127 +1,273 @@
 import asyncio
-import os
+import json
+import time
 import unittest
-import uuid
 
-from pymongo.errors import DuplicateKeyError
+import httpx
 
-from database import Database
-from tezcheck import PaymentError, Tezcheck
-
-
-class PaymentValidationTests(unittest.IsolatedAsyncioTestCase):
-    def setUp(self):
-        self.order = {'id': 1, 'amount': 150000, 'external_reference': 'ORD-test', 'bill_id': 'link_1'}
-        self.bill = {'id': 'link_1', 'external_reference': 'ORD-test', 'amount_minor': 15000000,
-                     'currency': 'UZS', 'paid': True, 'livemode': True, 'environment': 'live', 'state': 'expired'}
-        self.payment = {'id': 'pay_1', 'state': 'succeeded', 'amount_minor': 15000000, 'currency': 'UZS',
-                        'livemode': True, 'environment': 'live', 'refunded_amount_minor': 0}
-        self.client = object.__new__(Tezcheck)
-
-        async def response(*args, **kwargs):
-            return {'bill': self.bill, 'payment': self.payment}
-
-        self.client.request = response
-
-    async def test_live_payment_passes_even_if_bill_expired(self):
-        self.assertEqual(await self.client.check(self.order), (True, 'pay_1'))
-
-    async def test_unpaid_never_passes(self):
-        self.bill['paid'] = False
-        self.assertEqual(await self.client.check(self.order), (False, None))
-
-    async def test_test_payment_is_rejected(self):
-        self.bill['livemode'] = False
-        with self.assertRaises(PaymentError):
-            await self.client.check(self.order)
-
-    async def test_wrong_amount_is_rejected(self):
-        self.payment['amount_minor'] = 1
-        with self.assertRaises(PaymentError):
-            await self.client.check(self.order)
-
-    async def test_wrong_reference_is_rejected(self):
-        self.bill['external_reference'] = 'OTHER'
-        with self.assertRaises(PaymentError):
-            await self.client.check(self.order)
+from database import ts
+from services.payments import PaymentService
+from services.tezcheck import TezcheckError
+from services.webhook import create_app
+from tests.helpers import (ADMIN_ID, CHANNEL_ID, USER_ID, FakeBot, FakeTezcheck, make_db, make_settings, seed,
+                           sign_webhook, webhook_body)
 
 
-@unittest.skipUnless(os.getenv('MONGODB_TEST_URI'), 'MONGODB_TEST_URI berilmagan: Atlas integratsiya testlari o‘tkazib yuborildi.')
-class MongoDBTests(unittest.IsolatedAsyncioTestCase):
+class PaymentFlowTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
-        # Never use the configured production database. Each test owns a new random test DB.
-        self.db = Database(os.environ['MONGODB_TEST_URI'], 'kurs_bot_test_' + uuid.uuid4().hex)
-        await self.db.open()
-        self.addAsyncCleanup(self.cleanup_database)
-        self.cid = await self.db.course_change(1, 'add', {
-            'name': 'Python', 'description': 'Darslar', 'price': 150000, 'channel_chat_id': -1001234567890})
+        self.db, self.tmp = await make_db()
+        self.addAsyncCleanup(self._cleanup)
+        self.settings = make_settings(self.db.path)
+        self.api, self.bot = FakeTezcheck(), FakeBot()
+        self.payments = PaymentService(self.db, self.api, self.bot, self.settings)
+        self.cid = await seed(self.db)
 
-    async def cleanup_database(self):
-        try:
-            await self.db.client.drop_database(self.db.name)
-        finally:
-            await self.db.close()
-
-    async def test_concurrent_checkout_and_restart(self):
-        orders = await asyncio.gather(*(self.db.order(42, self.cid) for _ in range(10)))
-        self.assertEqual(len({o['id'] for o in orders}), 1)
+    async def _cleanup(self):
+        await self.payments.shutdown()
         await self.db.close()
-        await self.db.open()
-        self.assertEqual((await self.db.order(42, self.cid))['external_reference'], orders[0]['external_reference'])
+        self.tmp.cleanup()
 
-    async def test_paid_is_atomic_and_idempotent(self):
-        o = await self.db.order(42, self.cid)
-        await self.db.mark_paid(o, 'pay_unique')
-        await self.db.mark_paid(o, 'pay_unique')
-        self.assertEqual(len(await self.db.rows('purchases')), 1)
-        self.assertEqual((await self.db.order(42, self.cid))['status'], 'paid')
-        await self.db.update('purchases', {'order_id': o['id']}, {'invite_link': 'https://t.me/+saved', 'status': 'ready'})
-        await self.db.mark_paid(o, 'pay_unique')
-        self.assertEqual((await self.db.one('purchases', {'order_id': o['id']}))['invite_link'], 'https://t.me/+saved')
+    async def _pending_order(self):
+        result = await self.payments.checkout(USER_ID, self.cid)
+        self.assertEqual(result.kind, 'ready')
+        return result.order
 
-    async def test_duplicate_payment_rolls_back(self):
-        first = await self.db.order(42, self.cid)
-        second = await self.db.order(43, self.cid)
-        await self.db.mark_paid(first, 'pay_unique')
-        with self.assertRaises(DuplicateKeyError):
-            await self.db.mark_paid(second, 'pay_unique')
-        self.assertEqual((await self.db.one('orders', {'id': second['id']}))['status'], 'creating')
-        self.assertIsNone(await self.db.one('purchases', {'order_id': second['id']}))
+    # --------------------------------------------------------- buyurtma idempotentligi
+    async def test_checkout_is_idempotent(self):
+        results = await asyncio.gather(*(self.payments.checkout(USER_ID, self.cid) for _ in range(5)))
+        self.assertEqual({r.kind for r in results}, {'ready'})
+        self.assertEqual(len({r.order['id'] for r in results}), 1)
+        self.assertEqual(len({r.order['payment_url'] for r in results}), 1)
+        self.assertEqual(len(self.api.created), 1)                 # Tezcheck’ga bitta so‘rov
+        sent = self.api.created[0]
+        self.assertEqual(sent['amount_minor'], 150000 * 100)      # so‘m → tiyin
+        self.assertEqual(sent['ref'], results[0].order['external_reference'])
+        self.assertTrue(sent['key'])
 
-    async def test_purchase_failure_rolls_back_paid_status(self):
-        o = await self.db.order(42, self.cid)
-        await self.db.db.purchases.insert_one({'id': 1000, 'user_id': 42, 'course_id': self.cid, 'order_id': -1})
-        with self.assertRaises(DuplicateKeyError):
-            await self.db.mark_paid(o, 'pay_unique')
-        self.assertEqual((await self.db.one('orders', {'id': o['id']}))['status'], 'creating')
+    async def test_retry_after_api_failure_reuses_same_idempotency_key(self):
+        self.api.fail_create = TezcheckError('network_error', None, True)
+        failed = await self.payments.checkout(USER_ID, self.cid)
+        self.assertEqual(failed.kind, 'error')
+        self.api.fail_create = None
+        ok = await self.payments.checkout(USER_ID, self.cid)
+        self.assertEqual(ok.kind, 'ready')
+        self.assertEqual(failed.order['id'], ok.order['id'])
+        self.assertEqual(self.api.created[0]['key'], self.api.created[1]['key'])
+        self.assertEqual(len(self.api.bills), 1)
 
-    async def test_order_snapshots_survive_course_edit_and_delete(self):
-        o = await self.db.order(42, self.cid)
-        await self.db.course_change(1, 'edit', {'price': 200000, 'channel_chat_id': -100999}, cid=self.cid)
-        await self.db.course_change(1, 'delete', cid=self.cid)
-        same = await self.db.order(42, self.cid)
-        self.assertEqual(same['amount'], 150000)
-        self.assertEqual(same['channel_chat_id'], o['channel_chat_id'])
-        self.assertEqual(len(await self.db.rows('admin_logs')), 3)
+    async def test_inactive_course_cannot_be_paid(self):
+        await self.db.toggle_course(ADMIN_ID, self.cid)
+        self.assertEqual((await self.payments.checkout(USER_ID, self.cid)).kind, 'unavailable')
+        self.assertEqual(self.api.created, [])
 
-    async def test_invite_claim_is_atomic(self):
-        o = await self.db.order(42, self.cid)
-        await self.db.mark_paid(o, 'pay_unique')
-        results = await asyncio.gather(*(self.db.update('purchases',
-            {'order_id': o['id'], 'status': 'waiting'}, {'status': 'creating'}) for _ in range(10)))
-        self.assertEqual(sum(result.modified_count for result in results), 1)
+    # --------------------------------------------------------- tasdiqlanmaguncha havola yo‘q
+    async def test_no_invite_without_confirmed_payment(self):
+        order = await self._pending_order()
+        self.assertEqual(await self.payments.check_order(order['id']), 'pending')
+        self.assertEqual(self.bot.invites, [])
+        self.assertEqual(self.bot.links_sent_to(USER_ID), [])
+        self.assertIsNone(await self.db.purchase_for(USER_ID, self.cid))
 
-    async def test_funnel_deduplicates_views_and_matches_paid_order(self):
-        await self.db.track('course_view', 42, self.cid)
-        await self.db.track('course_view', 42, self.cid)
-        await self.db.track('checkout', 42, self.cid)
-        order = await self.db.order(42, self.cid)
-        await self.db.mark_paid(order, 'pay_funnel')
-        stages, conversion = await self.db.funnel_report()
-        self.assertEqual(stages['course_view']['unique'], 1)
-        self.assertEqual(stages['course_view']['hits'], 2)
-        self.assertEqual(conversion['views'], 1)
-        self.assertEqual(conversion['buyers'], 1)
+    async def test_deliver_refuses_unpaid_order_even_if_purchase_row_exists(self):
+        order = await self._pending_order()
+        # Himoya qatlamini sinash: qo‘lda (noto‘g‘ri) xarid yozuvi yaratilgan bo‘lsa ham havola berilmaydi.
+        cur = await self.db.write("INSERT INTO purchases(user_id, course_id, order_id, status, created_at, updated_at) "
+                                  "VALUES (?,?,?,'pending_invite',?,?)", (USER_ID, self.cid, order['id'], ts(), ts()))
+        self.assertEqual(await self.payments.deliver(cur.lastrowid), 'not_paid')
+        self.assertEqual(self.bot.invites, [])
+
+    async def test_paid_order_delivers_exactly_one_invite(self):
+        order = await self._pending_order()
+        self.api.pay(order['tezcheck_bill_id'])
+        self.assertEqual(await self.payments.check_order(order['id']), 'paid')
+        self.assertEqual(await self.payments.check_order(order['id']), 'paid')
+        await self.payments.poll_once()
+        self.assertEqual(len(self.bot.invites), 1)
+        invite = self.bot.invites[0]
+        self.assertEqual(invite['chat_id'], CHANNEL_ID)
+        self.assertEqual(invite['member_limit'], 1)
+        self.assertIsNotNone(invite['expire_date'])
+        self.assertEqual(self.bot.links_sent_to(USER_ID), [invite['link']])
+        purchase = await self.db.purchase_for(USER_ID, self.cid)
+        self.assertEqual(purchase['status'], 'sent')
+        self.assertIsNotNone(purchase['invite_sent_at'])
+        self.assertEqual((await self.db.get_order(order['id']))['status'], 'paid')
+
+    async def test_test_provider_payment_is_not_accepted(self):
+        order = await self._pending_order()
+        self.api.pay(order['tezcheck_bill_id'], environment='test')
+        self.assertEqual(await self.payments.check_order(order['id']), 'test')
+        self.assertEqual((await self.db.get_order(order['id']))['status'], 'pending')
+        self.assertEqual(self.bot.invites, [])
+
+    async def test_amount_mismatch_goes_to_review(self):
+        order = await self._pending_order()
+        self.api.pay(order['tezcheck_bill_id'], amount=100)
+        self.assertEqual(await self.payments.check_order(order['id']), 'review')
+        self.assertEqual((await self.db.get_order(order['id']))['status'], 'review')
+        self.assertEqual(self.bot.invites, [])
+        self.assertTrue(any(chat == ADMIN_ID for chat, _, _ in self.bot.messages))
+
+    async def test_expired_bill(self):
+        order = await self._pending_order()
+        self.api.bills[order['tezcheck_bill_id']]['state'] = 'expired'
+        self.assertEqual(await self.payments.check_order(order['id'], notify=True), 'expired')
+        self.assertEqual((await self.db.get_order(order['id']))['status'], 'expired')
+
+    async def test_api_error_keeps_order_pending(self):
+        order = await self._pending_order()
+        self.api.fail_get = TezcheckError('invalid_response:json')
+        self.assertEqual(await self.payments.check_order(order['id']), 'error')
+        self.assertEqual((await self.db.get_order(order['id']))['status'], 'pending')
+
+    # --------------------------------------------------------- yetkazish xatolari
+    async def test_invite_failure_alerts_and_admin_can_resend(self):
+        order = await self._pending_order()
+        self.api.pay(order['tezcheck_bill_id'])
+        self.bot.fail_invite = True
+        await self.payments.check_order(order['id'])
+        purchase = await self.db.purchase_for(USER_ID, self.cid)
+        self.assertEqual(purchase['status'], 'invite_failed')
+        self.assertTrue(any(chat == ADMIN_ID for chat, _, _ in self.bot.messages))      # admin ogohlantirildi
+        self.assertTrue(any(chat == USER_ID for chat, _, _ in self.bot.messages))       # xaridorga yordam xabari
+        await self.payments.poll_once()       # kanal xatosi avtomatik takrorlanmaydi
+        self.assertEqual(self.bot.invites, [])
+        self.bot.fail_invite = False
+        self.assertEqual(await self.payments.deliver(purchase['id'], actor='admin', new_link=True), 'sent')
+        self.assertEqual(len(self.bot.invites), 1)
+
+    async def test_blocked_user_gets_link_later(self):
+        order = await self._pending_order()
+        self.api.pay(order['tezcheck_bill_id'])
+        self.bot.blocked_users.add(USER_ID)
+        await self.payments.check_order(order['id'])
+        purchase = await self.db.purchase_for(USER_ID, self.cid)
+        self.assertEqual(purchase['status'], 'send_failed')
+        self.assertIsNotNone(purchase['invite_link'])          # havola saqlangan
+        self.bot.blocked_users.clear()
+        await self.payments.deliver_pending_for_user(USER_ID)  # foydalanuvchi /start bosganda
+        self.assertEqual(len(self.bot.invites), 1)              # yangi havola yaratilmadi
+        self.assertEqual(self.bot.links_sent_to(USER_ID), [purchase['invite_link']])
+        self.assertEqual((await self.db.purchase_for(USER_ID, self.cid))['status'], 'sent')
+
+    async def test_user_link_request_limits(self):
+        order = await self._pending_order()
+        self.api.pay(order['tezcheck_bill_id'])
+        await self.payments.check_order(order['id'])
+        purchase = await self.db.purchase_for(USER_ID, self.cid)
+        self.bot.members.add(USER_ID)
+        self.assertEqual(await self.payments.deliver(purchase['id'], actor='user'), 'member')
+        self.bot.members.clear()
+        self.assertEqual(await self.payments.deliver(purchase['id'], actor='user'), 'sent')   # o‘sha havola
+        self.assertEqual(len(self.bot.invites), 1)
+        await self.db.write("UPDATE purchases SET invite_expires_at = '2000-01-01 00:00:00', invite_count = 3")
+        self.assertEqual(await self.payments.deliver(purchase['id'], actor='user'), 'limit')
+        self.assertEqual(len(self.bot.invites), 1)
+
+
+class WebhookTests(unittest.IsolatedAsyncioTestCase):
+    async def asyncSetUp(self):
+        self.db, self.tmp = await make_db()
+        self.settings = make_settings(self.db.path)
+        self.api, self.bot = FakeTezcheck(), FakeBot()
+        self.payments = PaymentService(self.db, self.api, self.bot, self.settings)
+        self.cid = await seed(self.db)
+        app = create_app(self.settings, self.db, self.payments)
+        self.client = httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url='http://test')
+        self.addAsyncCleanup(self._cleanup)
+        self.order = (await self.payments.checkout(USER_ID, self.cid)).order
+        self.bill_id = self.order['tezcheck_bill_id']
+
+    async def _cleanup(self):
+        await self.client.aclose()
+        await self.payments.shutdown()
+        await self.db.close()
+        self.tmp.cleanup()
+
+    async def post(self, body: bytes, headers: dict):
+        response = await self.client.post(self.settings.webhook_path, content=body, headers=headers)
+        await self.payments.shutdown()        # fondagi havola yuborish tugashini kutamiz
+        return response
+
+    async def test_valid_webhook_marks_paid_once(self):
+        body = webhook_body(self.order, self.bill_id)
+        r1 = await self.post(body, sign_webhook(body, 'whd_1'))
+        self.assertEqual(r1.status_code, 200)
+        self.assertEqual((await self.db.get_order(self.order['id']))['status'], 'paid')
+        # Takroriy yetkazish va operator qayta yuborishi (yangi delivery id, o‘sha tana id).
+        r2 = await self.post(body, sign_webhook(body, 'whd_1'))
+        r3 = await self.post(body, sign_webhook(body, 'whd_2'))
+        self.assertTrue(r2.json()['duplicate'])
+        self.assertTrue(r3.json()['duplicate'])
+        self.assertEqual(len(self.bot.invites), 1)
+        self.assertEqual(len(self.bot.links_sent_to(USER_ID)), 1)
+        self.assertEqual(await self.db.value('SELECT COUNT(*) FROM purchases'), 1)
+        self.assertEqual((await self.db.get_webhook_event('oev_1'))['status'], 'processed')
+
+    async def test_distinct_events_for_same_payment_are_idempotent(self):
+        for n in range(3):
+            body = webhook_body(self.order, self.bill_id, event_id=f'oev_{n}')
+            self.assertEqual((await self.post(body, sign_webhook(body, f'whd_{n}'))).status_code, 200)
+        self.assertEqual(len(self.bot.invites), 1)
+        self.assertEqual(await self.db.value('SELECT COUNT(*) FROM purchases'), 1)
+
+    async def test_bad_signature_is_rejected_and_order_untouched(self):
+        body = webhook_body(self.order, self.bill_id)
+        headers = sign_webhook(body, secret='wbs_wrong_secret')
+        self.assertEqual((await self.post(body, headers)).status_code, 401)
+        tampered = body.replace(b'"live"', b'"live" ')
+        self.assertEqual((await self.post(tampered, sign_webhook(body))).status_code, 401)
+        headers = sign_webhook(body)
+        headers['X-Checkout-Signature'] = headers['X-Checkout-Signature'].replace('v1=', 'v2=')
+        self.assertEqual((await self.post(body, headers)).status_code, 401)
+        self.assertEqual((await self.post(body, {'Content-Type': 'application/json'})).status_code, 401)
+        self.assertEqual((await self.db.get_order(self.order['id']))['status'], 'pending')
+        self.assertIsNone(await self.db.get_webhook_event('oev_1'))
+        self.assertEqual(self.bot.invites, [])
+
+    async def test_stale_timestamp_is_rejected(self):
+        body = webhook_body(self.order, self.bill_id)
+        r = await self.post(body, sign_webhook(body, timestamp=int(time.time()) - 3600))
+        self.assertEqual(r.status_code, 401)
+        self.assertEqual((await self.db.get_order(self.order['id']))['status'], 'pending')
+
+    async def test_rotated_secret_header_with_two_signatures(self):
+        body = webhook_body(self.order, self.bill_id)
+        good = sign_webhook(body)
+        old = sign_webhook(body, secret='wbs_old', timestamp=int(good['X-Checkout-Timestamp']))
+        good['X-Checkout-Signature'] = old['X-Checkout-Signature'] + ',' + good['X-Checkout-Signature']
+        self.assertEqual((await self.post(body, good)).status_code, 200)
+        self.assertEqual((await self.db.get_order(self.order['id']))['status'], 'paid')
+
+    async def test_test_environment_does_not_grant_access(self):
+        body = webhook_body(self.order, self.bill_id, environment='test')
+        self.assertEqual((await self.post(body, sign_webhook(body))).status_code, 200)
+        self.assertEqual((await self.db.get_order(self.order['id']))['status'], 'pending')
+        self.assertEqual((await self.db.get_webhook_event('oev_1'))['status'], 'ignored')
+        self.assertEqual(self.bot.invites, [])
+
+    async def test_wrong_amount_does_not_grant_access(self):
+        body = webhook_body(self.order, self.bill_id, amount=1)
+        self.assertEqual((await self.post(body, sign_webhook(body))).status_code, 200)
+        self.assertEqual((await self.db.get_order(self.order['id']))['status'], 'review')
+        self.assertEqual(self.bot.invites, [])
+
+    async def test_failed_payment_event_is_ignored(self):
+        body = webhook_body(self.order, self.bill_id, event_type='payment.failed')
+        self.assertEqual((await self.post(body, sign_webhook(body))).status_code, 200)
+        self.assertEqual((await self.db.get_order(self.order['id']))['status'], 'pending')
+
+    async def test_unknown_order_and_bad_json(self):
+        body = json.dumps({'id': 'oev_x', 'type': 'payment.succeeded',
+                           'data': {'external_reference': 'ORD-unknown'}}).encode()
+        self.assertEqual((await self.post(body, sign_webhook(body))).status_code, 200)
+        self.assertEqual((await self.db.get_webhook_event('oev_x'))['error'], 'unknown_order')
+        bad = b'{not json'
+        self.assertEqual((await self.post(bad, sign_webhook(bad))).status_code, 400)
+
+    async def test_health_endpoint(self):
+        r = await self.client.get('/health')
+        self.assertEqual(r.json(), {'status': 'ok'})
 
 
 if __name__ == '__main__':
