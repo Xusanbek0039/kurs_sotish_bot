@@ -1,7 +1,7 @@
 """To‘lov oqimi: buyurtma → Tezcheck hisobi → tasdiq → xarid → kanal havolasi.
 
 Muhim qoidalar:
-* Buyurtma faqat Tezcheck API javobi (POST /bills/{bill}) yoki imzosi tekshirilgan webhook bilan “to‘landi” bo‘ladi.
+* Buyurtma faqat server tomonidagi Tezcheck API javobi (POST /bills/{bill}) bilan “to‘landi” bo‘ladi.
 * To‘lov tasdig‘i va xarid yaratish bitta tranzaksiyada (`Database.mark_paid`).
 * Havola yaratishdan oldin xarid atomar band qilinadi (`claim_purchase`), shuning uchun ikki marta yuborilmaydi.
 """
@@ -56,7 +56,7 @@ class PaymentService:
         return (user or {}).get('language') or self.settings.default_language
 
     def spawn(self, coro) -> None:
-        """Fon vazifasi (masalan, webhookdan keyin havola yuborish); o‘chishda kutib olinadi."""
+        """Fon vazifasi (masalan, /start’da kutilayotgan havolalarni yuborish); o‘chishda kutib olinadi."""
         task = asyncio.create_task(coro)
         self._tasks.add(task)
         task.add_done_callback(self._tasks.discard)
@@ -136,44 +136,6 @@ class PaymentService:
             await self.alert_admins('alert_duplicate_payment', order_id=order['id'], user_id=order['user_id'])
         if result.purchase_id:
             await self.deliver(result.purchase_id)
-
-    # --------------------------------------------------------------------- webhook
-    async def process_webhook_event(self, event: dict) -> tuple[str, str | None]:
-        """Imzosi tekshirilgan hodisani qayta ishlaydi. Natija: (processed|ignored, izoh)."""
-        event_type = event.get('type')
-        data = event.get('data')
-        if not isinstance(data, dict) or not isinstance(event_type, str):
-            return 'ignored', 'malformed'
-        reference = data.get('external_reference')
-        order = await self.db.get_order_by_reference(reference) if isinstance(reference, str) else None
-        if not order:
-            return 'ignored', 'unknown_order'
-
-        if event_type == 'payment.succeeded':
-            if data.get('environment') != 'live':
-                # Hujjat: yuqoridagi `mode` emas, `data.environment` ishonchli. Test to‘lovi kurs bermaydi.
-                return 'ignored', 'test_payment'
-            payment_id = data.get('payment_id')
-            bill_id = data.get('bill_id')
-            if (data.get('state') != 'succeeded' or not isinstance(payment_id, str) or not payment_id
-                    or type(data.get('amount_minor')) is not int or data['amount_minor'] != order['amount_uzs'] * 100
-                    or data.get('currency') != 'UZS' or not isinstance(bill_id, str)
-                    or (order['tezcheck_bill_id'] and bill_id != order['tezcheck_bill_id'])):
-                if order['status'] != 'paid':
-                    await self.db.set_order_status(order['id'], 'review', ('new', 'pending', 'expired'), 'mismatch')
-                    await self.alert_admins('alert_mismatch', order_id=order['id'], user_id=order['user_id'])
-                return 'ignored', 'mismatch'
-            result = await self.db.mark_paid(order['id'], payment_id, 'live', bill_id)
-            # Webhookga tez javob berish uchun havola yuborish fonda bajariladi.
-            self.spawn(self._after_paid(order, result))
-            return 'processed', None
-
-        if event_type in ('payment.refunded', 'payment.partially_refunded', 'payment.charged_back',
-                          'payment.disputed') and order['status'] == 'paid' and data.get('environment') == 'live':
-            await self.alert_admins('alert_refund', order_id=order['id'], user_id=order['user_id'],
-                                    event=h(event_type))
-            return 'processed', None
-        return 'ignored', event_type[:40]
 
     # ------------------------------------------------------------- havola yuborish
     async def deliver(self, purchase_id: int, actor: str = 'system', new_link: bool = False) -> str:

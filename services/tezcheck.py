@@ -3,17 +3,13 @@
 Faqat rasmiy hujjatdagi (https://tezcheck.uz/api-docs) endpoint va maydonlardan foydalaniladi:
   GET  /me             — kalit va kassa mosligini tekshirish
   POST /bills          — hisob yaratish (Idempotency-Key bilan)
-  POST /bills/{bill}   — hisob va to‘lov holatini o‘qish
-Webhook imzosi: HMAC-SHA256("{timestamp}.{delivery_id}.{raw_body}"), sarlavha "v1=<hex>[,v1=<hex>]".
+  POST /bills/{bill}   — hisob va to‘lov holatini o‘qish (to‘lovni tasdiqlashning yagona manbai)
 """
 from __future__ import annotations
 
 import asyncio
-import hashlib
-import hmac
 import json
 import logging
-import time
 from dataclasses import dataclass
 from enum import Enum
 from urllib.parse import quote, urlparse
@@ -22,7 +18,6 @@ import aiohttp
 
 log = logging.getLogger(__name__)
 
-SIGNATURE_WINDOW_SECONDS = 300
 RETRYABLE_HTTP = {429, 500, 502, 503, 504}
 
 
@@ -92,23 +87,6 @@ def evaluate_bill(order: dict, bill: BillStatus) -> Verdict:
             or (bill.refunded_amount_minor or 0) != 0):
         return Verdict.MISMATCH
     return Verdict.PAID
-
-
-def verify_webhook_signature(secret: str, raw_body: bytes, timestamp: str, delivery_id: str, header: str,
-                             now: float | None = None) -> bool:
-    """Hujjatdagi Python namunasi bilan bir xil tekshiruv (doimiy vaqtli solishtirish)."""
-    if not secret or not timestamp or not delivery_id or not header:
-        return False
-    try:
-        sent_at = int(timestamp)
-    except ValueError:
-        return False
-    if abs((now if now is not None else time.time()) - sent_at) > SIGNATURE_WINDOW_SECONDS:
-        return False
-    signed = timestamp.encode() + b'.' + delivery_id.encode() + b'.' + raw_body
-    expected = 'v1=' + hmac.new(secret.encode(), signed, hashlib.sha256).hexdigest()
-    # Kalit almashtirilganda sarlavhada ikkita imzo keladi — istalgan biri mos kelsa yetarli.
-    return any(hmac.compare_digest(candidate.strip(), expected) for candidate in header.split(','))
 
 
 def _require(cond: bool, what: str) -> None:

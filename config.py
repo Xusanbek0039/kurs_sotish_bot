@@ -32,11 +32,6 @@ class Settings:
     tezcheck_api_key: str = field(repr=False)
     tezcheck_cash_desk_code: str = field(repr=False)
     tezcheck_base_url: str = 'https://api.tezcheck.uz/api/merchant/v1'
-    tezcheck_webhook_secret: str = field(default='', repr=False)
-    public_base_url: str = ''
-    webhook_host: str = '0.0.0.0'
-    webhook_port: int = 8080
-    webhook_path: str = '/webhooks/tezcheck'
     database_path: Path = ROOT / 'data' / 'bot.sqlite3'
     support_username: str = ''
     default_language: str = 'uz'
@@ -46,17 +41,9 @@ class Settings:
     sticker_welcome: str = ''
     sticker_success: str = ''
 
-    @property
-    def webhook_enabled(self) -> bool:
-        return bool(self.tezcheck_webhook_secret)
-
-    @property
-    def webhook_url(self) -> str:
-        return self.public_base_url + self.webhook_path if self.public_base_url else ''
-
     def secrets(self) -> list[str]:
         """Loglardan yashiriladigan qiymatlar."""
-        return [s for s in (self.bot_token, self.tezcheck_api_key, self.tezcheck_webhook_secret) if s]
+        return [s for s in (self.bot_token, self.tezcheck_api_key) if s]
 
 
 def _get(env: Mapping[str, str | None], *names: str, default: str = '') -> str:
@@ -115,14 +102,6 @@ def load_settings(env: Mapping[str, str | None] | None = None) -> Settings:
     base_url = _https_url(_get(env, 'TEZCHECK_BASE_URL', 'TEZCHECK_API_BASE_URL',
                                default='https://api.tezcheck.uz/api/merchant/v1'), 'TEZCHECK_BASE_URL')
 
-    public = _get(env, 'PUBLIC_BASE_URL')
-    if public:
-        public = _https_url(public, 'PUBLIC_BASE_URL')
-
-    path = _get(env, 'WEBHOOK_PATH', default='/webhooks/tezcheck')
-    if not re.fullmatch(r'/[A-Za-z0-9/_-]{1,100}', path):
-        raise ConfigError('WEBHOOK_PATH “/” bilan boshlanib, faqat harf, raqam, “-”, “_”, “/” dan iborat bo‘lsin.')
-
     db_path = Path(_get(env, 'DATABASE_PATH', default='data/bot.sqlite3'))
     if not db_path.is_absolute():
         db_path = ROOT / db_path
@@ -151,11 +130,6 @@ def load_settings(env: Mapping[str, str | None] | None = None) -> Settings:
         tezcheck_api_key=api_key,
         tezcheck_cash_desk_code=desk,
         tezcheck_base_url=base_url,
-        tezcheck_webhook_secret=_get(env, 'TEZCHECK_WEBHOOK_SECRET'),
-        public_base_url=public,
-        webhook_host=_get(env, 'WEBHOOK_HOST', default='0.0.0.0'),
-        webhook_port=_int(env, 'WEBHOOK_PORT', default=8080, low=1, high=65535),
-        webhook_path=path,
         database_path=db_path,
         support_username=support,
         default_language=language,

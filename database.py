@@ -109,16 +109,6 @@ CREATE TABLE IF NOT EXISTS course_views (
     PRIMARY KEY (user_id, course_id)
 );
 
-CREATE TABLE IF NOT EXISTS webhook_events (
-    event_id      TEXT PRIMARY KEY,                -- Tezcheck tanasidagi "id"
-    event_type    TEXT NOT NULL,
-    delivery_id   TEXT,
-    received_at   TEXT NOT NULL,
-    status        TEXT NOT NULL CHECK (status IN ('received','processed','ignored','failed')),
-    processed_at  TEXT,
-    error         TEXT
-);
-
 CREATE TABLE IF NOT EXISTS admin_logs (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
     admin_id    INTEGER NOT NULL,
@@ -562,22 +552,3 @@ class Database:
             "UPDATE purchases SET status = CASE WHEN invite_link IS NULL THEN 'pending_invite' ELSE 'link_created' END, "
             "updated_at = ? WHERE status = 'sending'", (ts(),))
         return cur.rowcount
-
-    # ------------------------------------------------------------ webhook hodisa
-    async def register_webhook_event(self, event_id: str, event_type: str, delivery_id: str) -> str | None:
-        """Yangi hodisa bo‘lsa None, aks holda mavjud holatni qaytaradi."""
-        async with self.tx() as conn:
-            async with conn.execute('SELECT status FROM webhook_events WHERE event_id = ?', (event_id,)) as cur:
-                row = await cur.fetchone()
-            if row:
-                return row['status']
-            await conn.execute("INSERT INTO webhook_events(event_id, event_type, delivery_id, received_at, status) "
-                               "VALUES (?,?,?,?,'received')", (event_id, event_type[:64], delivery_id[:128], ts()))
-            return None
-
-    async def finish_webhook_event(self, event_id: str, status: str, error: str | None = None) -> None:
-        await self.write('UPDATE webhook_events SET status = ?, processed_at = ?, error = ? WHERE event_id = ?',
-                         (status, ts(), (error or None) and error[:300], event_id))
-
-    async def get_webhook_event(self, event_id: str) -> dict | None:
-        return await self.one('SELECT * FROM webhook_events WHERE event_id = ?', (event_id,))
