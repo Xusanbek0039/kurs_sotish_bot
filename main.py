@@ -67,20 +67,21 @@ def setup_logging(secrets: list[str] | None = None) -> None:
 
 
 async def set_commands(bot: Bot, settings: Settings) -> None:
+    # Menyu buyruqlari tavsifida Telegram faqat oddiy matn/emoji qabul qiladi (custom emoji ishlamaydi).
     common = {
-        'uz': [BotCommand(command='start', description='Bosh sahifa'),
-               BotCommand(command='courses', description='Kurslar'),
-               BotCommand(command='mycourses', description='Kurslarim'),
-               BotCommand(command='language', description='Til / Язык'),
-               BotCommand(command='help', description='Yordam')],
-        'ru': [BotCommand(command='start', description='Главная'),
-               BotCommand(command='courses', description='Курсы'),
-               BotCommand(command='mycourses', description='Мои курсы'),
-               BotCommand(command='language', description='Til / Язык'),
-               BotCommand(command='help', description='Помощь')],
+        'uz': [BotCommand(command='start', description='🏠 Bosh sahifa'),
+               BotCommand(command='courses', description='📚 Kurslar'),
+               BotCommand(command='mycourses', description='🎓 Kurslarim'),
+               BotCommand(command='language', description='🌐 Til / Язык'),
+               BotCommand(command='help', description='💬 Yordam')],
+        'ru': [BotCommand(command='start', description='🏠 Главная'),
+               BotCommand(command='courses', description='📚 Курсы'),
+               BotCommand(command='mycourses', description='🎓 Мои курсы'),
+               BotCommand(command='language', description='🌐 Til / Язык'),
+               BotCommand(command='help', description='💬 Помощь')],
     }
-    admin_extra = {'uz': BotCommand(command='admin', description='Admin panel'),
-                   'ru': BotCommand(command='admin', description='Админ-панель')}
+    admin_extra = {'uz': BotCommand(command='admin', description='⚙️ Admin panel'),
+                   'ru': BotCommand(command='admin', description='⚙️ Админ-панель')}
     with contextlib.suppress(TelegramAPIError):
         await bot.set_my_commands(common[settings.default_language], scope=BotCommandScopeDefault())
         await bot.set_my_commands(common['ru'], scope=BotCommandScopeDefault(), language_code='ru')
