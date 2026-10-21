@@ -1,9 +1,8 @@
 """Kurs sotish boti. Ishga tushirish: python main.py
 
 Bitta jarayonda bir vaqtda:
-  * Telegram bot (long polling)
-  * Tezcheck webhook serveri (TEZCHECK_WEBHOOK_SECRET berilgan bo‘lsa)
-  * ochiq to‘lovlarni davriy tekshiruvchi va havolalarni qayta yuboruvchi fon vazifa
+  * Telegram bot (long polling — ommaviy server/HTTPS manzil kerak emas)
+  * ochiq to‘lovlarni Tezcheck API orqali davriy tekshiruvchi va havolalarni qayta yuboruvchi fon vazifa
 """
 from __future__ import annotations
 
@@ -24,13 +23,12 @@ from database import Database
 from services.payments import PaymentService
 from services.tezcheck import TezcheckClient, TezcheckError
 from services.ui import EmojiFallbackMiddleware
-from services.webhook import WebhookServer, create_app
 
 log = logging.getLogger('bot')
 
 
 class RedactSecrets(logging.Filter):
-    """Token, API kalit va webhook maxfiy kaliti hech qachon logga tushmasin."""
+    """Bot tokeni va Tezcheck API kaliti hech qachon logga tushmasin."""
 
     def __init__(self, secrets: list[str]):
         super().__init__()
@@ -61,7 +59,7 @@ def setup_logging(secrets: list[str] | None = None) -> None:
     root = logging.getLogger()
     root.handlers[:] = [handler]
     root.setLevel(logging.INFO)
-    for noisy in ('aiogram.event', 'aiohttp.access', 'uvicorn.access', 'aiosqlite'):
+    for noisy in ('aiogram.event', 'aiosqlite'):
         logging.getLogger(noisy).setLevel(logging.WARNING)
 
 
@@ -126,7 +124,6 @@ async def run(settings: Settings) -> None:
     payments = PaymentService(db, api, bot, settings)
     stop = asyncio.Event()
     poller: asyncio.Task | None = None
-    server: WebhookServer | None = None
     try:
         try:
             me = await bot.get_me()
@@ -141,25 +138,8 @@ async def run(settings: Settings) -> None:
         # Telegram webhook o‘rnatilgan bo‘lsa, polling ishlamaydi — uni olib tashlaymiz (yangilanishlar saqlanadi).
         await bot.delete_webhook(drop_pending_updates=False)
 
-        if settings.webhook_enabled:
-            server = WebhookServer(create_app(settings, db, payments), settings.webhook_host, settings.webhook_port)
-            try:
-                server.start()
-                log.info('Tezcheck webhook serveri: http://%s:%s%s', settings.webhook_host, settings.webhook_port,
-                         settings.webhook_path)
-                if settings.webhook_url:
-                    log.info('Tezcheck kabinetiga yoziladigan manzil: %s', settings.webhook_url)
-                else:
-                    log.warning('PUBLIC_BASE_URL bo‘sh: Tezcheck webhook’ni tashqaridan yubora olmaydi. '
-                                'Zaxira rejim ishlaydi: “To‘lovni tekshirish” tugmasi va fon tekshiruvi.')
-            except OSError as exc:
-                server = None
-                log.error('Webhook serveri %s:%s portida ishga tushmadi (%s). Bot zaxira rejimda davom etadi.',
-                          settings.webhook_host, settings.webhook_port, exc.strerror or exc)
-        else:
-            log.warning('TEZCHECK_WEBHOOK_SECRET bo‘sh: webhook o‘chirilgan. To‘lovlar “To‘lovni tekshirish” tugmasi '
-                        'va har %s soniyadagi fon tekshiruvi orqali tasdiqlanadi.', settings.payment_check_interval)
-
+        log.info('To‘lovlar Tezcheck API orqali tasdiqlanadi: “To‘lovni tekshirish” tugmasi va har %s soniyadagi '
+                 'fon tekshiruvi.', settings.payment_check_interval)
         poller = asyncio.create_task(payments.run_poller(stop))
         log.info('Bot ishga tushdi. To‘xtatish: Ctrl+C')
         await dp.start_polling(bot, allowed_updates=dp.resolve_used_update_types(), close_bot_session=False)
@@ -170,8 +150,6 @@ async def run(settings: Settings) -> None:
             poller.cancel()
             with contextlib.suppress(asyncio.CancelledError, Exception):
                 await poller
-        if server:
-            await server.stop()
         await payments.shutdown()
         await api.close()
         await bot.session.close()
