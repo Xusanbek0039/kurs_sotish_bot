@@ -30,6 +30,9 @@ class HandlerTests(unittest.IsolatedAsyncioTestCase):
         self.addAsyncCleanup(self._cleanup)
 
     async def _cleanup(self):
+        # Modul darajasidagi routerlarni keyingi test uchun Dispatcher’dan ajratamiz.
+        for router in (handlers.admin.router, handlers.admin_users.router, handlers.user.router, handlers.fallback):
+            router._parent_router = None
         await self.payments.shutdown()
         await self.db.close()
         self.tmp.cleanup()
@@ -123,6 +126,36 @@ class HandlerTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((await self.db.get_order(result.order['id']))['status'], 'pending')
         await self.press(USER_ID, UserCb(action='catalog').pack())
         self.assertTrue(any('Курсы' in t for t in self.session.texts()))
+
+    # ------------------------------------------------------------ xarid havolasi (buy_<id>)
+    async def test_buy_link_goes_straight_to_payment(self):
+        await self.send_text(USER_ID, f'/start buy_{self.cid}')
+        last = self.session.requests[-1]
+        self.assertIn('#1', last.text)                                    # buyurtma darhol yaratildi
+        urls = [b.url for row in last.reply_markup.inline_keyboard for b in row if b.url]
+        self.assertTrue(any(u.startswith('https://pay.tezcheck.uz/') for u in urls))
+        self.assertEqual((await self.db.get_order(1))['status'], 'pending')
+
+    async def test_buy_link_for_new_user_asks_language_first(self):
+        await self.send_text(7777, f'/start buy_{self.cid}')
+        self.assertIsNone(await self.db.get_order(1))
+        await self.press(7777, LangCb(code='ru').pack())
+        self.assertIn('Перейти к оплате', str(self.session.requests[-1].reply_markup))
+        self.assertEqual((await self.db.get_order(1))['user_id'], 7777)
+
+    async def test_buy_link_for_inactive_course(self):
+        await self.db.toggle_course(ADMIN_ID, self.cid)
+        await self.send_text(USER_ID, f'/start buy_{self.cid}')
+        self.assertEqual(self.session.texts()[-1], TEXTS['uz']['course_unavailable'])
+        self.assertIsNone(await self.db.get_order(1))
+
+    async def test_admin_sees_purchase_link(self):
+        await self.press(ADMIN_ID, AdminCb(action='course', id=self.cid).pack())
+        self.assertIn(f'https://t.me/kurs_test_bot?start=buy_{self.cid}', self.session.texts()[-1])
+        await self.press(ADMIN_ID, AdminCb(action='links', id=self.cid).pack())
+        self.assertIn(f'?start=buy_{self.cid}', self.session.texts()[-1])
+        share = self.session.requests[-1].reply_markup.inline_keyboard[0][0].url
+        self.assertTrue(share.startswith('https://t.me/share/url?'))
 
     async def test_unknown_deep_link(self):
         await self.send_text(USER_ID, '/start course_99999')

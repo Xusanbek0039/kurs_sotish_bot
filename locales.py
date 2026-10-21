@@ -139,7 +139,8 @@ TEXTS: dict[str, dict[str, str]] = {
         'add_confirm': '📋 <b>Tekshirib chiqing</b>\n\n🇺🇿 <b>{name_uz}</b>\n{description_uz}\n\n🇷🇺 <b>{name_ru}</b>\n{description_ru}\n\n'
                        '💰 Narx: <b>{price}</b>\n📡 Kanal: <code>{channel}</code>\n\nSaqlaymizmi?',
         'btn_save': '✅ Saqlash',
-        'course_saved': '✅ Kurs saqlandi (#{course_id}).\n\n🔗 Havola: {link}',
+        'course_saved': '✅ Kurs saqlandi (#{course_id}).\n\n💳 Xarid havolasi (bosganda to‘g‘ri to‘lovga o‘tadi):\n'
+                        '<code>{buy_link}</code>\n\n📚 Kurs sahifasi:\n<code>{link}</code>',
         'input_cancelled': '✖️ Bekor qilindi.',
         'not_set': '— kiritilmagan —',
         'invalid_length': '⚠️ Matn {min}–{max} belgi bo‘lishi kerak. Qayta yuboring.',
@@ -160,7 +161,8 @@ TEXTS: dict[str, dict[str, str]] = {
         'admin_course_card': '{status} <b>#{id} · {name}</b>\n\n🇺🇿 <b>{name_uz}</b>\n{description_uz}\n\n'
                              '🇷🇺 <b>{name_ru}</b>\n{description_ru}\n\n💰 Narx: <b>{price}</b>\n'
                              '📡 Kanal: <code>{channel}</code>\n🧾 Buyurtmalar: {orders} · ✅ to‘langan: {paid}\n'
-                             '🕒 Yaratilgan: {created}\n🔗 {link}',
+                             '🕒 Yaratilgan: {created}\n\n💳 Xarid havolasi: <code>{buy_link}</code>\n'
+                             '📚 Kurs sahifasi: <code>{link}</code>',
         'course_active': '🟢 Faol',
         'course_inactive': '⚪️ Nofaol',
         'missing_translation': '\n\n⚠️ <b>Tarjima yetishmaydi:</b> {fields}. Xaridorga boshqa tildagi matn ko‘rsatiladi.',
@@ -177,6 +179,13 @@ TEXTS: dict[str, dict[str, str]] = {
         'btn_course_orders': '🧾 Buyurtmalar',
         'btn_check_channel': '📡 Kanalni tekshirish',
         'btn_preview': '👁 Xaridor ko‘rinishi',
+        'btn_course_links': '🔗 Xarid havolasi',
+        'btn_share_link': '📤 Havolani ulashish',
+        'course_links': '🔗 <b>{name}</b> — havolalar\n\n'
+                        '💳 <b>Xarid havolasi</b> — foydalanuvchi «Start»ni bosishi bilan shu kursni sotib olishga o‘tadi:\n'
+                        '<code>{buy_link}</code>\n\n'
+                        '📚 <b>Kurs sahifasi havolasi</b> — avval kurs tavsifi ko‘rsatiladi:\n<code>{link}</code>\n\n'
+                        'Havolani bosib nusxalang va kanal, reklama yoki ijtimoiy tarmoqlarga joylang.',
         'edit_prompt': '✏️ <b>{field}</b> uchun yangi qiymat yuboring.\n\nHozirgi qiymat:\n{current}',
         'edit_saved': '✅ Saqlandi.',
         'course_toggled_on': '▶️ Kurs faollashtirildi.',
@@ -402,7 +411,8 @@ TEXTS: dict[str, dict[str, str]] = {
         'add_confirm': '📋 <b>Проверьте данные</b>\n\n🇺🇿 <b>{name_uz}</b>\n{description_uz}\n\n🇷🇺 <b>{name_ru}</b>\n{description_ru}\n\n'
                        '💰 Цена: <b>{price}</b>\n📡 Канал: <code>{channel}</code>\n\nСохранить?',
         'btn_save': '✅ Сохранить',
-        'course_saved': '✅ Курс сохранён (#{course_id}).\n\n🔗 Ссылка: {link}',
+        'course_saved': '✅ Курс сохранён (#{course_id}).\n\n💳 Ссылка на покупку (сразу ведёт к оплате):\n'
+                        '<code>{buy_link}</code>\n\n📚 Страница курса:\n<code>{link}</code>',
         'input_cancelled': '✖️ Отменено.',
         'not_set': '— не указано —',
         'invalid_length': '⚠️ Текст должен содержать {min}–{max} символов. Отправьте ещё раз.',
@@ -422,7 +432,8 @@ TEXTS: dict[str, dict[str, str]] = {
         'admin_course_card': '{status} <b>#{id} · {name}</b>\n\n🇺🇿 <b>{name_uz}</b>\n{description_uz}\n\n'
                              '🇷🇺 <b>{name_ru}</b>\n{description_ru}\n\n💰 Цена: <b>{price}</b>\n'
                              '📡 Канал: <code>{channel}</code>\n🧾 Заказы: {orders} · ✅ оплачено: {paid}\n'
-                             '🕒 Создан: {created}\n🔗 {link}',
+                             '🕒 Создан: {created}\n\n💳 Ссылка на покупку: <code>{buy_link}</code>\n'
+                             '📚 Страница курса: <code>{link}</code>',
         'course_active': '🟢 Активен',
         'course_inactive': '⚪️ Неактивен',
         'missing_translation': '\n\n⚠️ <b>Нет перевода:</b> {fields}. Покупателю будет показан текст на другом языке.',
@@ -439,6 +450,13 @@ TEXTS: dict[str, dict[str, str]] = {
         'btn_course_orders': '🧾 Заказы',
         'btn_check_channel': '📡 Проверить канал',
         'btn_preview': '👁 Вид для покупателя',
+        'btn_course_links': '🔗 Ссылка на покупку',
+        'btn_share_link': '📤 Поделиться ссылкой',
+        'course_links': '🔗 <b>{name}</b> — ссылки\n\n'
+                        '💳 <b>Ссылка на покупку</b> — после нажатия «Start» пользователь сразу переходит к оплате этого курса:\n'
+                        '<code>{buy_link}</code>\n\n'
+                        '📚 <b>Ссылка на страницу курса</b> — сначала показывается описание:\n<code>{link}</code>\n\n'
+                        'Нажмите на ссылку, чтобы скопировать, и разместите её в канале, рекламе или соцсетях.',
         'edit_prompt': '✏️ Отправьте новое значение для поля <b>{field}</b>.\n\nТекущее значение:\n{current}',
         'edit_saved': '✅ Сохранено.',
         'course_toggled_on': '▶️ Курс активирован.',

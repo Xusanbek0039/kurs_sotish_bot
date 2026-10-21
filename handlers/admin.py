@@ -9,6 +9,7 @@ import json
 import logging
 import re
 import sqlite3
+from urllib.parse import urlencode
 
 from aiogram import Bot, F, Router
 from aiogram.exceptions import TelegramAPIError
@@ -96,9 +97,10 @@ async def check_channel(bot: Bot, chat_id: int) -> str | None:
     return None
 
 
-async def deep_link(bot: Bot, course_id: int) -> str:
+async def deep_link(bot: Bot, course_id: int, kind: str = 'course') -> str:
+    """kind='course' — kurs sahifasi; kind='buy' — Start bosilganda to‘g‘ridan-to‘g‘ri to‘lov."""
     me = await bot.me()
-    return f'https://t.me/{me.username}?start=course_{course_id}'
+    return f'https://t.me/{me.username}?start={kind}_{course_id}'
 
 
 # ------------------------------------------------------------------ menyu
@@ -232,7 +234,8 @@ async def add_save(call: CallbackQuery, state: FSMContext, db: Database, lang: s
     await call.answer()
     course_id = await db.add_course(call.from_user.id, data)
     await state.clear()
-    await call.message.answer(t(lang, 'course_saved', course_id=course_id, link=await deep_link(bot, course_id)))
+    await call.message.answer(t(lang, 'course_saved', course_id=course_id, link=await deep_link(bot, course_id),
+                                buy_link=await deep_link(bot, course_id, 'buy')))
     await _course_card(call.message, db, lang, course_id, bot, new=True)
 
 
@@ -265,7 +268,8 @@ async def _course_card(event, db: Database, lang: str, course_id: int, bot: Bot,
              description_uz=h(course['description_uz'] or not_set), name_ru=h(course['name_ru'] or not_set),
              description_ru=h(course['description_ru'] or not_set), price=money(course['price_uzs'], lang),
              channel=course['channel_chat_id'], orders=counts['n'] or 0, paid=counts['paid'] or 0,
-             created=dt(course['created_at']), link=await deep_link(bot, course_id))
+             created=dt(course['created_at']), link=await deep_link(bot, course_id),
+             buy_link=await deep_link(bot, course_id, 'buy'))
     missing = missing_translations(course)
     if missing:
         text += t(lang, 'missing_translation', fields=', '.join(t(lang, f'field_{f}') for f in missing))
@@ -288,6 +292,20 @@ async def preview_cb(call: CallbackQuery, callback_data: AdminCb, db: Database, 
     await call.answer()
     text, markup = await course_view(db, callback_data.id, call.from_user.id, lang, settings, is_admin=True)
     await call.message.answer(text, reply_markup=markup)
+
+
+@router.callback_query(AdminCb.filter(F.action == 'links'))
+async def links_cb(call: CallbackQuery, callback_data: AdminCb, db: Database, lang: str, bot: Bot):
+    course = await db.get_course(callback_data.id)
+    if not course:
+        await call.answer(t(lang, 'course_not_found'), show_alert=True)
+        return
+    await call.answer()
+    buy_link = await deep_link(bot, course['id'], 'buy')
+    share = 'https://t.me/share/url?' + urlencode({'url': buy_link, 'text': course_name(course, lang)})
+    await call.message.answer(t(lang, 'course_links', name=h(course_name(course, lang)), buy_link=buy_link,
+                                link=await deep_link(bot, course['id'])),
+                              reply_markup=kb.links_kb(lang, course['id'], share))
 
 
 @router.callback_query(AdminCb.filter(F.action == 'toggle'))

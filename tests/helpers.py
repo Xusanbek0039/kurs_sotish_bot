@@ -8,7 +8,8 @@ from types import SimpleNamespace
 
 from aiogram.client.session.base import BaseSession
 from aiogram.exceptions import TelegramBadRequest, TelegramForbiddenError
-from aiogram.methods import AnswerCallbackQuery, EditMessageText, GetMe, SendDocument, SendMessage
+from aiogram.methods import (AnswerCallbackQuery, EditMessageText, GetChat, GetChatMember, GetMe, SendDocument,
+                             SendMessage)
 from aiogram.types import Chat, Message, User
 
 from config import Settings
@@ -149,8 +150,11 @@ class RecordingSession(BaseSession):
             return Message(message_id=len(self.requests), date=datetime.now(timezone.utc),
                            chat=Chat(id=int(method.chat_id or 0), type='private'),
                            text=getattr(method, 'text', None) or '')
-        if isinstance(method, AnswerCallbackQuery):
-            return True
+        if isinstance(method, GetChat):
+            return SimpleNamespace(id=method.chat_id, type='channel')
+        if isinstance(method, GetChatMember):
+            # Bot kanalda admin va taklif huquqiga ega (kanal tekshiruvi o‘tadi).
+            return SimpleNamespace(status='administrator', can_invite_users=True)
         return True
 
     def texts(self) -> list[str]:

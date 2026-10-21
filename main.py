@@ -52,6 +52,9 @@ class RedactSecrets(logging.Filter):
 
 
 def setup_logging(secrets: list[str] | None = None) -> None:
+    # Windows konsolida o‘zbek/rus harflari buzilmasligi uchun.
+    with contextlib.suppress(AttributeError, ValueError):
+        sys.stdout.reconfigure(encoding='utf-8', errors='replace')
     handler = logging.StreamHandler(sys.stdout)
     handler.setFormatter(logging.Formatter('%(asctime)s %(levelname)-7s %(name)s: %(message)s', '%Y-%m-%d %H:%M:%S'))
     if secrets:

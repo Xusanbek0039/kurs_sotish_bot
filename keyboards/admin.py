@@ -68,10 +68,17 @@ def course_kb(lang: str, course: dict) -> InlineKeyboardMarkup:
         b.row(*fields[i:i + 2])
     b.row(_b(t(lang, 'btn_deactivate') if course['is_active'] else t(lang, 'btn_activate'), 'toggle', cid),
           _b(t(lang, 'btn_check_channel'), 'chkchan', cid))
+    b.row(_b(t(lang, 'btn_course_links'), 'links', cid, style='primary'))
     b.row(_b(t(lang, 'btn_course_orders'), 'orders', cid), _b(t(lang, 'btn_preview'), 'preview', cid))
     b.row(_b(t(lang, 'btn_delete'), 'del', cid, style='danger'))
     b.row(*back_row(lang, 'courses'))
     return b.as_markup()
+
+
+def links_kb(lang: str, course_id: int, share_url: str) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text=t(lang, 'btn_share_link'), url=share_url)],
+        [_b(t(lang, 'btn_back'), 'course', course_id), _b(t(lang, 'btn_admin_panel'), 'menu')]])
 
 
 def confirm_delete_kb(lang: str, course_id: int) -> InlineKeyboardMarkup:

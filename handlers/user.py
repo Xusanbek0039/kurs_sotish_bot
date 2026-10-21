@@ -45,23 +45,27 @@ async def cmd_start(message: Message, command: CommandObject, state: FSMContext,
         await state.update_data(pending_start=payload)
         await message.answer(LANGUAGE_PROMPT, reply_markup=language_kb())
         return
-    await _after_start(message, payload, lang, is_admin, settings, message.from_user.first_name, db)
+    await _after_start(message, payload, lang, is_admin, settings, message.from_user.first_name, db, payments)
 
 
 async def _after_start(message: Message, payload: str, lang: str, is_admin: bool, settings,
-                       first_name: str | None, db):
+                       first_name: str | None, db, payments: PaymentService):
     if settings.sticker_welcome and not payload:
         with contextlib.suppress(TelegramAPIError):
             await message.answer_sticker(settings.sticker_welcome)
     await message.answer(t(lang, 'welcome', emoji=emoji(settings, 'course', '✨'), name=h(first_name or '')),
                          reply_markup=main_reply_kb(lang, is_admin))
-    if payload.startswith('course_'):
-        # Deep link: https://t.me/BOT_USERNAME?start=course_<id>
-        raw = payload[len('course_'):]
-        if raw.isdigit() and len(raw) <= 9:
+    kind, _, raw = payload.partition('_')
+    if kind in ('course', 'buy') and raw:
+        # Deep link: ?start=course_<id> — kurs sahifasi; ?start=buy_<id> — to‘g‘ridan-to‘g‘ri to‘lov.
+        if not (raw.isdigit() and len(raw) <= 9) or not await db.get_course(int(raw)):
+            await message.answer(t(lang, 'course_not_found'), reply_markup=back_to_menu_kb(lang, settings))
+        elif kind == 'buy':
+            if not is_admin:
+                await db.record_course_view(message.chat.id, int(raw))
+            await send_checkout(message, message.chat.id, int(raw), lang, settings, payments)
+        else:
             await send_course(message, db, int(raw), lang, settings, message.chat.id, is_admin)
-            return
-        await message.answer(t(lang, 'course_not_found'), reply_markup=back_to_menu_kb(lang, settings))
         return
     await message.answer(t(lang, 'main_menu'), reply_markup=main_menu_kb(lang, is_admin, settings))
 
@@ -79,7 +83,8 @@ async def ask_language_cb(call: CallbackQuery):
 
 
 @router.callback_query(LangCb.filter(F.code.in_({'uz', 'ru'})))
-async def set_language(call: CallbackQuery, callback_data: LangCb, state: FSMContext, db, is_admin: bool, settings):
+async def set_language(call: CallbackQuery, callback_data: LangCb, state: FSMContext, db, is_admin: bool, settings,
+                       payments: PaymentService):
     lang = callback_data.code
     # Tilni almashtirish buyurtma, xarid va to‘lov holatiga ta’sir qilmaydi — faqat users.language.
     await db.set_language(call.from_user.id, lang)
@@ -90,7 +95,7 @@ async def set_language(call: CallbackQuery, callback_data: LangCb, state: FSMCon
     payload = data.get('pending_start')
     if payload is not None:
         await state.update_data(pending_start=None)
-        await _after_start(call.message, payload, lang, is_admin, settings, call.from_user.first_name, db)
+        await _after_start(call.message, payload, lang, is_admin, settings, call.from_user.first_name, db, payments)
         return
     await call.message.answer(t(lang, 'language_saved'), reply_markup=main_reply_kb(lang, is_admin))
     await call.message.answer(t(lang, 'main_menu'), reply_markup=main_menu_kb(lang, is_admin, settings))
@@ -172,20 +177,25 @@ async def course_cb(call: CallbackQuery, callback_data: UserCb, db, lang: str, s
 @router.callback_query(UserCb.filter(F.action == 'buy'))
 async def buy_cb(call: CallbackQuery, callback_data: UserCb, lang: str, settings, payments: PaymentService):
     await call.answer(t(lang, 'payment_preparing'))
-    result = await payments.checkout(call.from_user.id, callback_data.id)
+    await send_checkout(call, call.from_user.id, callback_data.id, lang, settings, payments)
+
+
+async def send_checkout(event, user_id: int, course_id: int, lang: str, settings, payments: PaymentService):
+    """Buyurtma yaratib, to‘lov tugmasini ko‘rsatadi (kurs kartasidagi tugma va buy_<id> havolasi uchun)."""
+    result = await payments.checkout(user_id, course_id)
     if result.kind == 'purchased':
-        await show(call, t(lang, 'already_purchased'), back_to_menu_kb(lang, settings))
+        await show(event, t(lang, 'already_purchased'), back_to_menu_kb(lang, settings))
     elif result.kind == 'unavailable':
-        await show(call, t(lang, 'course_unavailable'), back_to_menu_kb(lang, settings))
+        await show(event, t(lang, 'course_unavailable'), back_to_menu_kb(lang, settings))
     elif result.kind == 'ready':
         order = result.order
         course = await payments.db.get_course(order['course_id'], include_deleted=True)
-        await show(call, t(lang, 'payment_ready', emoji=emoji(settings, 'payment', '💳'),
-                           course=h(course_name(course, lang) if course else order['course_title']),
-                           order_id=order['id'], amount=money(order['amount_uzs'], lang)),
+        await show(event, t(lang, 'payment_ready', emoji=emoji(settings, 'payment', '💳'),
+                            course=h(course_name(course, lang) if course else order['course_title']),
+                            order_id=order['id'], amount=money(order['amount_uzs'], lang)),
                    payment_kb(lang, order, settings))
     else:
-        await show(call, t(lang, 'payment_error', support=_support(lang, settings)), back_to_menu_kb(lang, settings))
+        await show(event, t(lang, 'payment_error', support=_support(lang, settings)), back_to_menu_kb(lang, settings))
 
 
 @router.callback_query(UserCb.filter(F.action == 'check'))
