@@ -1,30 +1,42 @@
-# Telegram orqali kurs sotish
+# Kurs sotish boti (Telegram + Tezcheck)
 
-Python 3.11+ va MongoDB Atlas asosidagi aiogram 3 bot. Boshlash buyrug‘i: `python main.py`.
+Foydalanuvchi kursni tanlaydi, Tezcheck orqali to‘laydi va to‘lov tasdiqlangach shu kursning yopiq
+Telegram kanaliga **shaxsiy, bir martalik, muddati cheklangan** havolani avtomatik oladi.
+Admin hammasini botning o‘zidan boshqaradi. Interfeys ikki tilda: 🇺🇿 o‘zbekcha (lotin) va 🇷🇺 ruscha.
 
-## Tuzilishi
+Ishga tushirish: **`python main.py`**
 
-```text
-kurs_sotish_bot/
-  main.py                  Telegram menyulari, admin suhbatlari va fon vazifasi
-  config.py                .env konfiguratsiyasi
-  database.py              MongoDB kolleksiyalari, indekslar va tranzaksiyalar
-  tezcheck.py               Merchant API mijozi
-  marketing.py              kurs taqdimoti, reklama havolalari va matnlar
-  requirements.txt
-  .env.example
-  .gitignore
-  README.md
-  tests/test_payments.py
-  tests/test_config.py
-  tests/test_marketing.py
-  MARKETING_GUIDE.md        kurs sotuvini sozlash bo‘yicha amaliy yo‘riqnoma
-  FULL_CODE.md             barcha fayllar kodining birlashtirilgan nusxasi
-```
+## Imkoniyatlar
 
-## Windows (PowerShell)
+**Xaridor:** til tanlash (birinchi kirishda) · “🌐 Til / Язык” tugmasi har joyda · kurslar katalogi (nom + narx) ·
+kurs kartasi · “💳 To‘lov qilish” · “🔄 To‘lovni tekshirish” · “🎓 Kurslarim” (xaridlar va kutilayotgan to‘lovlar,
+havolani qayta olish) · yordam bo‘limi.
 
-Python 3.11 yoki yangiroq versiyani python.org saytidan o‘rnating va PATH belgisini yoqing.
+**Admin (faqat `ADMIN_IDS`dagi Telegram ID’lar):** `/admin` yoki “⚙️ Admin panel” →
+kurs qo‘shish (bosqichma-bosqich, bekor qilish tugmasi bilan) · kurslar ro‘yxati va kartasi · nom/tavsif (uz/ru),
+narx, kanal `chat_id`ni tahrirlash · faol/nofaol qilish · tasdiq bilan o‘chirish (tarix saqlanadi) ·
+**🔗 xarid havolasi** · kanal huquqlarini tekshirish · buyurtmalar (holat va kurs bo‘yicha filtr) · Tezcheck’da
+qo‘lda tekshirish · havolani qayta yuborish · qidiruv (foydalanuvchi ID, buyurtma ID, @username, ism) ·
+👥 foydalanuvchilar (faollik statistikasi, filtrlar, saralash, profil, bloklash, CSV eksport) · statistika ·
+yuborilmagan havolalar · admin amallari tarixi.
+
+## Kurs havolalari (deep link)
+
+Har bir kurs uchun ikki xil havola bor — ikkalasi kurs kartasida va “🔗 Xarid havolasi” tugmasida ko‘rinadi:
+
+| Havola | Foydalanuvchi “Start”ni bosganda |
+|---|---|
+| `https://t.me/BOT_USERNAME?start=buy_<id>` | **darhol shu kurs uchun buyurtma ochiladi va to‘lov tugmasi chiqadi** |
+| `https://t.me/BOT_USERNAME?start=course_<id>` | avval kurs tavsifi va narxi, keyin “💳 To‘lov qilish” |
+
+Yangi foydalanuvchi avval tilni tanlaydi, so‘ng havola o‘sha tilda davom etadi. Kurs nofaol yoki o‘chirilgan
+bo‘lsa to‘lov ochilmaydi; kurs allaqachon sotib olingan bo‘lsa, ikkinchi buyurtma yaratilmaydi.
+
+## O‘rnatish
+
+Python **3.11 yoki yangiroq** kerak.
+
+**Windows (PowerShell):**
 
 ```powershell
 py -m venv .venv
@@ -35,16 +47,7 @@ notepad .env
 python main.py
 ```
 
-Agar PowerShell aktivlashtirishni cheklasa, virtual muhitdagi Pythonni to‘g‘ridan-to‘g‘ri chaqiring:
-
-```powershell
-.\.venv\Scripts\python.exe -m pip install -r requirements.txt
-.\.venv\Scripts\python.exe main.py
-```
-
-## Linux
-
-Python 3.11+ va distributivingizdagi Python venv paketini o‘rnating.
+**Linux:**
 
 ```bash
 python3 -m venv .venv
@@ -55,119 +58,134 @@ nano .env
 python main.py
 ```
 
-## Sozlash
+To‘xtatish: `Ctrl+C` — fon vazifasi, Tezcheck va Telegram ulanishlari, baza tartibli yopiladi.
+`data/` katalogi va SQLite bazasi avtomatik yaratiladi; qayta ishga tushganda ma’lumotlar saqlanadi.
 
-- `BOT_TOKEN`: Telegramdagi rasmiy @BotFather orqali `/newbot` bilan yarating.
-- `ADMIN_IDS`: adminlarning raqamli Telegram IDlari, vergul bilan. Botdagi `/id` o‘z IDingizni ko‘rsatadi. Username yozmang.
-- `TEZCHECK_API_TOKEN`: Tezcheck savdogar kabinetida API kalit yarating.
-- `TEZCHECK_CASH_DESK_CODE`: kabinetdagi kassa kodi; bu kassa IDsi emas.
-- `TEZCHECK_API_BASE_URL`: namunadagi rasmiy HTTPS manzil.
-- `MONGODB_URI`: Atlas kabinetidagi Connect → Drivers bo‘limidan olingan maxfiy ulanish manzili.
-- `MONGODB_DATABASE`: baza nomi, odatda `kurs_sotish_bot`.
-- `POLL_INTERVAL`: tekshirishlar orasidagi soniyalar, kamida 30.
-- `INVITE_TTL_HOURS`: kirish havolasi muddati, 1–168 soat.
-- `CUSTOM_EMOJI_ID`: ixtiyoriy haqiqiy Telegram custom emoji IDsi. Bo‘sh bo‘lsa oddiy emoji ishlaydi. Telegram hisob/bot cheklovlariga qarab custom emoji oddiy emoji sifatida ko‘rinishi mumkin.
-- `BRAND_NAME`: bosh sahifada ko‘rinadigan maktab/brend nomi, 80 belgigacha.
-- `WELCOME_TEXT`: salomlashuvdan keyingi tanishtiruv, 600 belgigacha.
-- `SUPPORT_USERNAME`: yordam beradigan haqiqiy Telegram username, masalan `@kurs_yordam`. Bo‘sh bo‘lsa shaxsiy yozish tugmasi ko‘rsatilmaydi; yordam bo‘limi ishlaydi.
+## `.env` sozlamalari
 
-Eski `TEZCHECK_API_KEY` va `TEZCHECK_BASE_URL` nomlari ham ishlaydi. Yangi va eski nom bir vaqtda to‘ldirilsa, `TEZCHECK_API_TOKEN` va `TEZCHECK_API_BASE_URL` ustun turadi. Yangi nom bo‘sh bo‘lsa, eski qiymat ishlatiladi. `.env`dagi boshqa kalitlarni o‘chirish yoki qayta yozish shart emas.
+| Kalit | Tavsif |
+|---|---|
+| `BOT_TOKEN` | @BotFather → `/newbot` bergan token |
+| `ADMIN_IDS` | Adminlarning **raqamli** Telegram ID’lari, vergul bilan (username emas) |
+| `TEZCHECK_API_KEY` | Tezcheck kabinetidagi API kalit |
+| `TEZCHECK_CASH_DESK_CODE` | Kassa **kodi** (`cdk_...`), kassa ID emas |
+| `TEZCHECK_BASE_URL` | `https://api.tezcheck.uz/api/merchant/v1` |
+| `DATABASE_PATH` | SQLite fayli, standart `data/bot.sqlite3` |
+| `DEFAULT_LANGUAGE` | `uz` yoki `ru` |
+| `SUPPORT_USERNAME` | Yordam uchun Telegram username (ixtiyoriy) |
+| `CUSTOM_EMOJI_COURSE`, `CUSTOM_EMOJI_PAYMENT`, `CUSTOM_EMOJI_SUCCESS` | Ixtiyoriy haqiqiy custom emoji ID’lari (faqat raqam) |
+| `STICKER_WELCOME_FILE_ID`, `STICKER_SUCCESS_FILE_ID` | Ixtiyoriy stiker `file_id` lari |
+| `PAYMENT_CHECK_INTERVAL` | Ochiq to‘lovlarni tekshirish oralig‘i, soniya (15–3600, standart 60) |
+| `INVITE_LINK_TTL_HOURS` | Kanal havolasi muddati, soat (1–168, standart 24) |
 
-```dotenv
-TEZCHECK_API_BASE_URL=https://api.tezcheck.uz/api/merchant/v1
-TEZCHECK_API_TOKEN=
-TEZCHECK_CASH_DESK_CODE=
+Eski nomlar ham ishlaydi: `TEZCHECK_API_TOKEN`, `TEZCHECK_API_BASE_URL`, `POLL_INTERVAL`, `INVITE_TTL_HOURS`.
+`.env` Git’ga tushmaydi (`.gitignore`). Token va API kalit loglarda `***` bilan yashiriladi.
+
+Ishga tushganda bot Telegram tokenini (`getMe`) va Tezcheck kalit+kassa mosligini (`GET /me`) tekshiradi —
+bu so‘rovlar hisob yaratmaydi va pul harakatiga olib kelmaydi. Xato bo‘lsa, konsolda sababi yoziladi.
+
+**Custom emoji:** ID noto‘g‘ri bo‘lsa yoki Telegram uni rad etsa, xabar avtomatik oddiy emoji bilan qayta
+yuboriladi. ID olish: custom emoji’ni @RawDataBot ga yuboring yoki Bot API `getCustomEmojiStickers` orqali tekshiring.
+**Stiker `file_id`:** stikerni botingizga yuboring va `message.sticker.file_id` qiymatini oling.
+
+## Yopiq kanalni ulash
+
+1. Yopiq kanal yarating (ochiq username bo‘lmasin).
+2. Botni kanalga **admin** qiling va **“Foydalanuvchilarni taklif qilish” (Invite users)** huquqini bering.
+3. Kanal `chat_id`sini oling (odatda `-100…`): kanal postini @RawDataBot / @getidsbot ga forward qiling.
+4. Admin panelda kurs qo‘shayotganda `chat_id`ni kiriting — bot kanal va o‘z huquqlarini darhol tekshiradi.
+   Kurs kartasidagi “📡 Kanalni tekshirish” tugmasi ham bor.
+
+Havola `member_limit=1` (faqat bitta kishi kira oladi) va `INVITE_LINK_TTL_HOURS` muddat bilan yaratiladi va faqat
+xaridorga shaxsiy xabarda yuboriladi. Admin “📨 Havolani qayta yuborish” qilsa — eski havola bekor qilinib, yangisi
+yaratiladi. Xaridor o‘zi “Kurslarim”dan havolani qayta so‘rashi mumkin: kanalda bo‘lsa yangi havola berilmaydi,
+muddati o‘tgan havolani yangilash 3 marta bilan cheklangan (ortig‘i — admin orqali).
+
+## To‘lov qanday tasdiqlanadi
+
+Bot **webhook ishlatmaydi** — ommaviy server, domen yoki HTTPS kerak emas. To‘lov faqat server tomonidan
+Tezcheck API (`POST /bills/{bill}`) javobi bilan tasdiqlanadi:
+
+1. **“🔄 To‘lovni tekshirish”** — xaridor bosganda bot Tezcheck’dan holatni so‘raydi (5 soniyalik cheklov bilan).
+2. **Fon tekshiruvi** — har `PAYMENT_CHECK_INTERVAL` soniyada ochiq (`pending`) buyurtmalar avtomatik tekshiriladi;
+   to‘lov o‘tgan bo‘lsa, xaridor tugmani bosmasa ham havola yuboriladi.
+
+Brauzerdan qaytish, “To‘ladim” deyish yoki skrinshot tasdiq emas. Bot to‘xtab turgan paytdagi to‘lovlar
+qayta ishga tushganda fon tekshiruvi orqali topiladi. Bot doimiy ishlashi kerak (kompyuter yoqiq yoki VPS).
+
+Kursga kirish faqat shu holatda beriladi: `bill.paid = true`, `livemode = true`, `environment = "live"`,
+`payment.state = "succeeded"`, summa, `external_reference` va hisob ID buyurtmaga mos, qaytarilgan summa 0.
+Test provayderi to‘lovi (`environment: "test"`) kurs **bermaydi**, admin ogohlantiriladi. Summa yoki ma’lumot mos
+kelmasa, buyurtma “🕵️ Tekshiruvda” holatiga o‘tadi va adminlarga xabar ketadi.
+
+## Tezcheck integratsiyasi
+
+[Rasmiy hujjat](https://tezcheck.uz/api-docs) bo‘yicha qilingan; faqat hujjatdagi endpoint va maydonlar ishlatiladi:
+
+- Sarlavhalar: `Authorization: Bearer <TEZCHECK_API_KEY>`, `X-Cash-Desk-Code: <TEZCHECK_CASH_DESK_CODE>`.
+- `GET /me` — ishga tushishda ulanish tekshiruvi.
+- `POST /bills` — `amount_minor` (so‘m × 100, butun son), `title`, `external_reference`. `currency` yuborilmaydi
+  (hujjat: platforma faqat UZS). Har buyurtmaning o‘zgarmas `external_reference` (`ORD-<uuid>`) va
+  `Idempotency-Key`i bor — tarmoq uzilib qayta yuborilsa, ikkinchi hisob yaratilmaydi.
+- `POST /bills/{bill}` — holatni o‘qish (hujjatda aynan POST).
+- Xatolar: HTTP timeout, internet uzilishi, noto‘g‘ri JSON, `error.code` (401/403/404/409/422/429/5xx) ushlanadi;
+  faqat qayta urinish xavfsiz bo‘lgan holatlarda (5xx, 429, tarmoq, `resource.conflict`) qayta so‘raladi.
+
+Hujjat bo‘yicha aniqlik kiritilgan nuqtalar:
+
+- **`payment_url` faqat bir marta qaytadi** — darhol bazaga saqlanadi. Bot faqat `https://` havolani qabul qiladi
+  (hujjat namunasidagi `http://localhost…` faqat misol).
+- Hujjatdagi eng kichik summa — 1 000 so‘m, shuning uchun admin panel narxni 1 000 – 1 000 000 000 so‘m oralig‘ida qabul qiladi.
+- Kassa kalitida “faqat imzolangan so‘rovlar” yoqilgan bo‘lsa, Bearer so‘rovlar rad etiladi — kabinetda o‘chiq bo‘lsin.
+- Pul qaytarish (refund/chargeback) holatida bot foydalanuvchini kanaldan avtomatik chiqarmaydi.
+- Kurs nofaol qilinganda allaqachon yuborilgan to‘lov havolasi Tezcheck’da amal qilishda davom etadi; agar u
+  to‘lansa, xaridor kursni oladi (pul to‘lagan).
+
+## Ma’lumotlar bazasi (SQLite)
+
+Jadvallar: `users` (ID, username, ism, til, ro‘yxatdan o‘tgan vaqt, oxirgi faollik, blok), `courses`
+(`name_uz/ru`, `description_uz/ru`, `price_uzs`, `channel_chat_id`, `is_active`, `is_deleted`, vaqtlar),
+`orders`, `purchases`, `course_views` (qaysi kursni ko‘rgan), `admin_logs`.
+
+- Foreign key, unique va indekslar: bitta foydalanuvchi+kurs uchun bitta ochiq buyurtma, bitta xarid; bitta
+  Tezcheck hisob/to‘lov ID bitta buyurtmaga.
+- To‘lovni tasdiqlash va xarid yaratish **bitta tranzaksiyada**; takroriy tekshiruvlar ikkinchi xarid yoki havola yaratmaydi.
+- Havola yuborish atomar “band qilinadi” — ikki vazifa bitta xaridni ikki marta yubormaydi.
+- Kurs o‘chirilganda yozuv faqat belgilanadi (`is_deleted`), buyurtma va xaridlar tarixi saqlanadi.
+- Karta ma’lumotlari bazaga hech qachon tushmaydi (to‘lov Tezcheck sahifasida bo‘ladi).
+
+Xaridor botni bloklagan bo‘lsa, havola saqlanadi va fonda qayta urinadi (vaqt oralig‘i oshib boradi); xaridor
+`/start` bosganda ham darhol yuboriladi. Kanal xatosida (bot admin emas, noto‘g‘ri `chat_id`) xaridorga yordam xabari,
+adminlarga ogohlantirish ketadi; tuzatgandan so‘ng “📨 Yuborilmagan havolalar” bo‘limidan qayta yuboriladi.
+
+## Loyiha tuzilishi
+
+```text
+main.py              ishga tushirish: polling + fon tekshiruvi, tartibli to‘xtash, loglarni maxfiylash
+config.py            .env o‘qish va tekshirish
+database.py          SQLite sxema, tranzaksiyalar, so‘rovlar
+locales.py           barcha matnlar: uz va ru
+handlers/            user.py (xaridor), admin.py (kurs/buyurtma/qidiruv), admin_users.py (foydalanuvchilar),
+                     utils.py (admin filtri, middleware), __init__.py (routerlar, xatolar)
+keyboards/           inline va pastki menyu tugmalari
+services/            tezcheck.py (API mijozi), payments.py (to‘lov va havola oqimi), ui.py (formatlash, emoji)
+tests/               unit va integratsion testlar (tarmoqsiz)
+legacy_mongo/        oldingi MongoDB versiyasining zaxira nusxasi (ishlatilmaydi)
 ```
 
-`.env` va MongoDB ulanish manzilini oshkor qilmang. Loglarda token, MongoDB URI, API javobi va to‘lov/taklif URLlari chiqarilmaydi.
-
-## MongoDB Atlas sozlash
-
-1. [MongoDB Atlas](https://www.mongodb.com/atlas) hisobingizda loyiha va klaster yarating.
-2. Database Access orqali baza foydalanuvchisini yarating. Bot uchun `kurs_sotish_bot` bazasida `readWrite` huquqini bering.
-3. Network Access bo‘limida bot ishlaydigan kompyuter/serverning tashqi IP manzilini ruxsat ro‘yxatiga qo‘shing. [Atlas IP access list hujjati](https://www.mongodb.com/docs/atlas/security/add-ip-address-to-list/).
-4. Connect → Drivers → Python orqali connection stringni oling. Username va parolni o‘zingizniki bilan almashtiring. Paroldagi maxsus belgilar URI uchun percent-encode qilinishi kerak.
-5. `.env`ga yozing. Quyidagilar faqat format namunasi, haqiqiy kalitlar emas:
-
-```dotenv
-MONGODB_URI="mongodb+srv://BOT_USER:ENCODED_PASSWORD@YOUR_CLUSTER.mongodb.net/?retryWrites=true&w=majority"
-MONGODB_DATABASE=kurs_sotish_bot
-```
-
-Bot bazani, `courses`, `orders`, `purchases`, `admin_logs` va raqamli IDlar uchun `counters` kolleksiyasini avtomatik yaratadi. Ulanish uchun internet zarur. PyMongo Async ishlatiladi; [rasmiy tranzaksiya hujjati](https://www.mongodb.com/docs/languages/python/pymongo-driver/current/crud/transactions/). Tranzaksiyalar uchun replica set kerak; Atlas klasteridan foydalaning, standalone lokal MongoDB mos emas. Eski SQLite fayli bo‘lsa, uning ma’lumotlari avtomatik import qilinmaydi.
-
-Yopiq kanal yarating va botni **Invite users** huquqi bilan admin qiling. Kanalda ochiq username bo‘lmasin. Kanal postini botga yuborib chat ID aniqlash mumkin; ishonchli Telegram Bot API `getUpdates` javobida `channel_post.chat.id` qiymati ham ko‘rinadi. Polling ishlayotgan paytda ikkinchi `getUpdates` chaqiruvini ishlatmang. Kanal IDsi odatda `-100` bilan boshlanadi. Uni kurs qo‘shish suhbatida kiriting; bot kanal turi va o‘z huquqlarini tekshiradi.
-
-Admin avval botni `/start` bilan ochsin. `/admin` menyusida kurs qo‘shish, barcha maydonlarni tahrirlash, faol/nofaol qilish, tasdiqlab o‘chirish, sahifalangan buyurtmalar va statistika bor. Tahrirlashda nom, tavsif, narx, kanal ketma-ket qayta kiritiladi. `/cancel` suhbatni bekor qiladi. Kurs kartasida alohida `https://t.me/BOT_USERNAME?start=course_ID` havolasi chiqadi. Oddiy xaridor admin menyusini ko‘rmaydi; admin handlerlari ham IDni tekshiradi.
-
-## Sotuvga mos xaridor oqimi
-
-- Bosh sahifa brend va tanishtiruv matni bilan ochiladi. Kurslar narxi bilan sahifalanadi.
-- Kurs sahifasida auditoriya, o‘quv natijalari, davomiylik/format, ustoz va aniq xarid tugmasi ko‘rinadi.
-- Dastur va to‘liq tavsif alohida ochiladi. Demo havolasi kiritilsa bepul tanishuv tugmasi chiqadi.
-- `/purchases` yoki **Mening xaridlarim** oldingi buyurtmalarni ko‘rsatadi. Xarid qilingan kurs uchun yangi hisob yaratilmaydi.
-- `/help` xarid tartibi va to‘lov savollariga javob beradi; kontakt sozlansa maslahatchiga yozish tugmasi ko‘rinadi.
-- Kursni ulashish tugmasi [Telegramning rasmiy share havolasi](https://core.telegram.org/widgets/share) orqali ishlaydi. Foydalanuvchi yuborishni o‘zi tanlaydi.
-
-Admin: **Kurslar → kurs → Sotuv sahifasini sozlash**. Maydonlar alohida tahrirlanadi, `-` bilan tozalanadi va auditga yoziladi. Marketing maydonlari ixtiyoriy: oldingi kurslar o‘zgarishsiz ishlaydi. **Reklama uchun matn** mavjud kurs ma’lumotlari va deep linkdan post tayyorlaydi; avtomatik reklama yuborilmaydi. [Amaliy marketing yo‘riqnomasi](MARKETING_GUIDE.md).
-
-**Sotuv bosqichlari** bo‘limi kursni ko‘rish → xaridni boshlash → tasdiqlangan xaridni ko‘rsatadi. `funnel` kolleksiyasi har bir event/user/kurs uchun bitta yozuv va takroriy ko‘rish hisobini saqlaydi. Admin ko‘rishlari chiqarib tashlanadi. Konversiya kuzatilgan user/kurs juftliklaridan to‘laganlar ulushi; statistika yangi funksiya yoqilgan vaqtdan boshlanadi.
-
-## Tezcheck bilan shartnoma
-
-Kod yozishdan oldin [rasmiy Merchant API hujjati](https://tezcheck.uz/api-docs) tekshirildi. Aiogram versiyasi [rasmiy 3.29 hujjatlariga](https://docs.aiogram.dev/en/v3.29.0/changelog.html) asoslangan.
-
-API mijozi autentifikatsiya sarlavhalarini yuboradi. Hisob `POST /bills` bilan yaratiladi; `data.bill.id` va `data.payment_url` darhol saqlanadi. Narx butun so‘mda, API summasi esa 100 ga ko‘paytirilib yuboriladi. Har bir order o‘zgarmas UUID reference va idempotency kalitiga ega.
-
-Holat uchun **POST** `/bills/{bill}` ishlatiladi. `bill.paid`, `bill.livemode`, haqiqiy muhit, payment holati, summa, valyuta va buyurtmaga moslik tekshiriladi. Test to‘lovi kanalni ochmaydi. Brauzer qaytishi va tugma bosilishi to‘lov isboti emas. Webhook kerak emas: foydalanuvchi tugmasi va fon tekshiruvi mavjud. `/health` admin buyrug‘i bazani va autentifikatsiyalangan `GET /me` ulanishini tekshiradi; hisob yaratmaydi.
-
-Kassa kalitida faqat imzolangan so‘rovlar talabi yoqilgan bo‘lsa, bu Bearer mijozi rad etiladi. Ushbu loyiha uchun kabinetda Bearer so‘rovlariga ruxsat bering.
-
-## Saqlash va xatolardan tiklash
-
-Bir foydalanuvchi/kurs uchun bitta ochiq buyurtma va bitta xarid mavjud. To‘lovni qayta ishlash tranzaksiyali. Mavjud xarid uchun yangi hisob ochilmaydi; saqlangan havola qayta ko‘rsatilishi mumkin. Kurs o‘chirilishi arxivlash orqali bajariladi, buyurtma va audit tarixi saqlanadi. Buyurtma narxi, nomi va kanal IDsi xarid boshlangan paytdagi nusxasi bilan saqlanadi.
-
-Noaniq hisob yaratish javobi o‘sha order va idempotency kaliti bilan qayta so‘raladi. Idempotency saqlanishi cheklanganligi sabab 23 soatdan eski, bill IDsi olinmagan order `review` holatiga o‘tadi. Admin kabinetda orderning `external_reference` raqami bo‘yicha solishtirishi kerak; avtomatik yangi hisob ochilmaydi.
-
-Kirish havolasi muddati cheklangan **join request** havolasi: bot faqat to‘lagan foydalanuvchining IDsi uchun so‘rovni tasdiqlaydi, keyin havolani bekor qiladi. Telegramda join request va `member_limit=1` birga ishlatilmaydi. Ushbu usul ulashilgan havoladan begona shaxs kirishini cheklaydi. Boshqa adminlar begona so‘rovlarni qo‘lda tasdiqlamasin.
-
-Telegramga taklif yaratish paytida jarayon uzilsa, yangi havola avtomatik yaratilmaydi: admin yordam beradi. Kanal huquqi xatosi haqida adminlarga xabar yuboriladi. Havola muddati o‘tgan yoki `error` holatidagi haqiqiy xaridorga admin kabinetdagi tekshiruvdan so‘ng qo‘lda yordam beradi. To‘langan foydalanuvchini qayta to‘lashga majburlamang. Bot bloklangan bo‘lsa xabar yetkazish keyingi fon aylanishida qayta uriniladi.
-
-Faqat bitta bot jarayonini ishga tushiring. Buyurtmalar, xaridlar va audit Atlasda doimiy saqlanadi; tugallanmagan admin suhbatlari xotirada, restartdan keyin qayta boshlanadi. Bir user/kurs uchun bitta order saqlanadi va qayta ishlatiladi. To‘lov va xarid yozuvlari, shuningdek kurs o‘zgarishi va uning auditi bir tranzaksiyada yoziladi. Noyob indekslar bill, payment, xarid va havola takrorlanishini cheklaydi. Taklif yaratish huquqi atomar yangilash bilan olinadi. Bu bot refund/chargebackdan keyin kanal a’zosini avtomatik chiqarishni bajarmaydi; keyingi qaytarishlarni admin nazorat qiladi.
-
-## Test
+## Testlar
 
 ```bash
-python -m unittest discover -s tests -v
+python -m unittest discover -s tests -t .
 ```
 
-API validatsiya testlari tarmoqsiz ishlaydi. Baza testlari `MONGODB_TEST_URI` berilmasa o‘tkazib yuboriladi. Atlas integratsiya testlari bir vaqtdagi xarid, restart, takroriy to‘lov, tranzaksiya rollback, kurs nusxasi, audit va taklif uchun atomar himoyani tekshiradi. Telegram/Tezcheck tarmog‘iga murojaat qilinmaydi.
+72 ta test, internet va haqiqiy pulsiz (Tezcheck va Telegram soxta/lokal server bilan): admin ruxsati va soxta admin
+callback’lar, kurs CRUD va qo‘shish bosqichlari, buyurtma idempotentligi (parallel bosishlar), takroriy tekshiruvlarda
+bitta xarid/havola, to‘lov tasdiqlanmaguncha havola berilmasligi, test va mos kelmaydigan to‘lovlar, `buy_`/`course_`
+havolalari, til almashtirish, foydalanuvchilar bo‘limi va CSV, Tezcheck so‘rov formati va xatolari.
 
-Konfiguratsiya testlari yangi/eski Tezcheck nomlari va ustuvorligini tekshiradi. Marketing testlari matn uzunligi, HTML escaping, demo URL, ulashish havolasi, xaridorning o‘z orderiga kirishi va to‘langan kurs uchun ikkinchi hisob ochilmasligini tekshiradi. Bu unit testlar haqiqiy `.env`ni o‘qimaydi.
+## Cheklovlar
 
-Integratsiya testlari uchun alohida test klasterida `kurs_bot_test_` prefiksli vaqtinchalik bazalarni yaratish/o‘chirish huquqi kerak. Har bir test noyob vaqtinchalik baza yaratadi va tugagach o‘chiradi. Test URI oddiy `.env`dan avtomatik o‘qilmaydi; muhit o‘zgaruvchisi qilib bering:
-
-```powershell
-$env:MONGODB_TEST_URI = 'ATLAS_TEST_CONNECTION_STRING'
-python -m unittest discover -s tests -v
-```
-
-```bash
-export MONGODB_TEST_URI='ATLAS_TEST_CONNECTION_STRING'
-python -m unittest discover -s tests -v
-```
-
-Qo‘lda yakuniy ssenariy:
-
-1. `/health` bilan kassa ulanishini tekshiring.
-2. `/admin` → **Kurs qo‘shish** → nom → tavsif → narx → kanal ID → tasdiqlash.
-3. Kurs kartasidagi deep linkni boshqa foydalanuvchi bilan oching.
-4. **To‘lov qilish** → hisob yaratilishini tekshiring. Qayta bosilganda o‘sha hisob chiqsin.
-5. To‘lamasdan **To‘lovni tekshirish** bosing: kanal havolasi berilmasin.
-6. Avval Test provider bilan to‘lang: test to‘lovi sifatida rad etilsin. Bu haqiqiy kursni ochmaydi; jonli sinov uchun boshqa foydalanuvchi/kursdan foydalaning.
-7. Ruxsat etilgan haqiqiy provayder bilan to‘lovni yakunlang. **To‘lovni tekshirish** yoki fon vazifasini kuting.
-8. Kanal havolasini oching, kirish so‘rovi aynan xaridor uchun tasdiqlansin. Havolani boshqa ID bilan ochganda rad etilsin.
-9. Botni qayta ishga tushiring va xaridni takrorlang: ikkinchi hisob/havola yaratilmasin. Admin statistikasida bitta to‘lov ko‘rinsin.
-10. Kursning sotuv maydonlari va demo darsini to‘ldiring. Admin preview va boshqa xaridorda kartani ochib tekshiring; xaridorning `/purchases` va `/help` tugmalarini sinang. **Sotuv bosqichlari**da admin ko‘rishlari qo‘shilmaganini tekshiring.
-
-Ushbu tayyorlash muhitida `.venv` ko‘rsatgan Python bajariluvchi fayli topilmadi; avtomatik testlar va real to‘lov yakunigacha ishga tushirish bajarilmagan. Ishga tushirish uchun ishlaydigan Python, haqiqiy tokenlar, kassa va kanal huquqlari kerak.
+- Faqat **bitta** bot jarayonini ishga tushiring (bir token bilan ikkita polling ishlamaydi).
+- Admin kiritish bosqichlari xotirada saqlanadi — qayta ishga tushganda tugallanmagan kiritishni qaytadan boshlang.
+- Webhook keyinroq kerak bo‘lsa (ommaviy HTTPS server bilan), uni alohida qo‘shish mumkin; hozir tasdiq API orqali.
