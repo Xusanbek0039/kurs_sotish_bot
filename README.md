@@ -1,6 +1,6 @@
 # Telegram orqali kurs sotish
 
-Python 3.11+ va SQLite asosidagi aiogram 3 bot. Boshlash buyrug‘i: `python main.py`.
+Python 3.11+ va MongoDB Atlas asosidagi aiogram 3 bot. Boshlash buyrug‘i: `python main.py`.
 
 ## Tuzilishi
 
@@ -8,14 +8,14 @@ Python 3.11+ va SQLite asosidagi aiogram 3 bot. Boshlash buyrug‘i: `python mai
 kurs_sotish_bot/
   main.py                  Telegram menyulari, admin suhbatlari va fon vazifasi
   config.py                .env konfiguratsiyasi
-  database.py              SQLite sxemasi va tranzaksiyalar
+  database.py              MongoDB kolleksiyalari, indekslar va tranzaksiyalar
   tezcheck.py               Merchant API mijozi
   requirements.txt
   .env.example
   .gitignore
   README.md
   tests/test_payments.py
-  data/bot.db               birinchi ishga tushirishda yaratiladi
+  FULL_CODE.md             barcha fayllar kodining birlashtirilgan nusxasi
 ```
 
 ## Windows (PowerShell)
@@ -58,12 +58,28 @@ python main.py
 - `TEZCHECK_API_KEY`: Tezcheck savdogar kabinetida API kalit yarating.
 - `TEZCHECK_CASH_DESK_CODE`: kabinetdagi kassa kodi; bu kassa IDsi emas.
 - `TEZCHECK_BASE_URL`: namunadagi rasmiy HTTPS manzil.
-- `DATABASE_PATH`: SQLite faylining joyi; `.env`dan nisbiy yo‘l berilsa loyiha papkasiga nisbatan olinadi.
+- `MONGODB_URI`: Atlas kabinetidagi Connect → Drivers bo‘limidan olingan maxfiy ulanish manzili.
+- `MONGODB_DATABASE`: baza nomi, odatda `kurs_sotish_bot`.
 - `POLL_INTERVAL`: tekshirishlar orasidagi soniyalar, kamida 30.
 - `INVITE_TTL_HOURS`: kirish havolasi muddati, 1–168 soat.
 - `CUSTOM_EMOJI_ID`: ixtiyoriy haqiqiy Telegram custom emoji IDsi. Bo‘sh bo‘lsa oddiy emoji ishlaydi. Telegram hisob/bot cheklovlariga qarab custom emoji oddiy emoji sifatida ko‘rinishi mumkin.
 
-`.env` va SQLite faylini oshkor qilmang. Loglarda token, API javobi va to‘lov/taklif URLlari chiqarilmaydi.
+`.env` va MongoDB ulanish manzilini oshkor qilmang. Loglarda token, MongoDB URI, API javobi va to‘lov/taklif URLlari chiqarilmaydi.
+
+## MongoDB Atlas sozlash
+
+1. [MongoDB Atlas](https://www.mongodb.com/atlas) hisobingizda loyiha va klaster yarating.
+2. Database Access orqali baza foydalanuvchisini yarating. Bot uchun `kurs_sotish_bot` bazasida `readWrite` huquqini bering.
+3. Network Access bo‘limida bot ishlaydigan kompyuter/serverning tashqi IP manzilini ruxsat ro‘yxatiga qo‘shing. [Atlas IP access list hujjati](https://www.mongodb.com/docs/atlas/security/add-ip-address-to-list/).
+4. Connect → Drivers → Python orqali connection stringni oling. Username va parolni o‘zingizniki bilan almashtiring. Paroldagi maxsus belgilar URI uchun percent-encode qilinishi kerak.
+5. `.env`ga yozing. Quyidagilar faqat format namunasi, haqiqiy kalitlar emas:
+
+```dotenv
+MONGODB_URI="mongodb+srv://BOT_USER:ENCODED_PASSWORD@YOUR_CLUSTER.mongodb.net/?retryWrites=true&w=majority"
+MONGODB_DATABASE=kurs_sotish_bot
+```
+
+Bot bazani, `courses`, `orders`, `purchases`, `admin_logs` va raqamli IDlar uchun `counters` kolleksiyasini avtomatik yaratadi. Ulanish uchun internet zarur. PyMongo Async ishlatiladi; [rasmiy tranzaksiya hujjati](https://www.mongodb.com/docs/languages/python/pymongo-driver/current/crud/transactions/). Tranzaksiyalar uchun replica set kerak; Atlas klasteridan foydalaning, standalone lokal MongoDB mos emas. Eski SQLite fayli bo‘lsa, uning ma’lumotlari avtomatik import qilinmaydi.
 
 Yopiq kanal yarating va botni **Invite users** huquqi bilan admin qiling. Kanalda ochiq username bo‘lmasin. Kanal postini botga yuborib chat ID aniqlash mumkin; ishonchli Telegram Bot API `getUpdates` javobida `channel_post.chat.id` qiymati ham ko‘rinadi. Polling ishlayotgan paytda ikkinchi `getUpdates` chaqiruvini ishlatmang. Kanal IDsi odatda `-100` bilan boshlanadi. Uni kurs qo‘shish suhbatida kiriting; bot kanal turi va o‘z huquqlarini tekshiradi.
 
@@ -89,7 +105,7 @@ Kirish havolasi muddati cheklangan **join request** havolasi: bot faqat to‘lag
 
 Telegramga taklif yaratish paytida jarayon uzilsa, yangi havola avtomatik yaratilmaydi: admin yordam beradi. Kanal huquqi xatosi haqida adminlarga xabar yuboriladi. Havola muddati o‘tgan yoki `error` holatidagi haqiqiy xaridorga admin kabinetdagi tekshiruvdan so‘ng qo‘lda yordam beradi. To‘langan foydalanuvchini qayta to‘lashga majburlamang. Bot bloklangan bo‘lsa xabar yetkazish keyingi fon aylanishida qayta uriniladi.
 
-Faqat bitta bot jarayonini ishga tushiring. Buyurtmalar, xaridlar va audit doimiy; tugallanmagan admin suhbatlari xotirada, restartdan keyin qayta boshlanadi. SQLite joylashgan disk doimiy bo‘lsin. Ishlayotgan WAL bazasini nusxalashda SQLite backup usulidan foydalaning yoki botni to‘xtatib nusxalang. Bu bot refund/chargebackdan keyin kanal a’zosini avtomatik chiqarishni bajarmaydi; keyingi qaytarishlarni admin nazorat qiladi.
+Faqat bitta bot jarayonini ishga tushiring. Buyurtmalar, xaridlar va audit Atlasda doimiy saqlanadi; tugallanmagan admin suhbatlari xotirada, restartdan keyin qayta boshlanadi. Bir user/kurs uchun bitta order saqlanadi va qayta ishlatiladi. To‘lov va xarid yozuvlari, shuningdek kurs o‘zgarishi va uning auditi bir tranzaksiyada yoziladi. Noyob indekslar bill, payment, xarid va havola takrorlanishini cheklaydi. Taklif yaratish huquqi atomar yangilash bilan olinadi. Bu bot refund/chargebackdan keyin kanal a’zosini avtomatik chiqarishni bajarmaydi; keyingi qaytarishlarni admin nazorat qiladi.
 
 ## Test
 
@@ -97,7 +113,19 @@ Faqat bitta bot jarayonini ishga tushiring. Buyurtmalar, xaridlar va audit doimi
 python -m unittest discover -s tests -v
 ```
 
-Testlar bir vaqtdagi xarid, restartdan keyingi buyurtma, takroriy tasdiqlash, kurs o‘zgarishidan mustaqil order nusxasi, test to‘lovi va noto‘g‘ri summani rad etishni tekshiradi. Haqiqiy Telegram/Tezcheck tarmog‘iga murojaat qilmaydi.
+API validatsiya testlari tarmoqsiz ishlaydi. Baza testlari `MONGODB_TEST_URI` berilmasa o‘tkazib yuboriladi. Atlas integratsiya testlari bir vaqtdagi xarid, restart, takroriy to‘lov, tranzaksiya rollback, kurs nusxasi, audit va taklif uchun atomar himoyani tekshiradi. Telegram/Tezcheck tarmog‘iga murojaat qilinmaydi.
+
+Integratsiya testlari uchun alohida test klasterida `kurs_bot_test_` prefiksli vaqtinchalik bazalarni yaratish/o‘chirish huquqi kerak. Har bir test noyob vaqtinchalik baza yaratadi va tugagach o‘chiradi. Test URI oddiy `.env`dan avtomatik o‘qilmaydi; muhit o‘zgaruvchisi qilib bering:
+
+```powershell
+$env:MONGODB_TEST_URI = 'ATLAS_TEST_CONNECTION_STRING'
+python -m unittest discover -s tests -v
+```
+
+```bash
+export MONGODB_TEST_URI='ATLAS_TEST_CONNECTION_STRING'
+python -m unittest discover -s tests -v
+```
 
 Qo‘lda yakuniy ssenariy:
 

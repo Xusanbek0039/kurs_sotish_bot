@@ -18,7 +18,8 @@ from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import BotCommand, BotCommandScopeChat, InlineKeyboardButton, InlineKeyboardMarkup, Message
 
 from config import Config
-from database import Database
+from database import Database, now
+from pymongo.errors import PyMongoError
 from tezcheck import PaymentError, Tezcheck
 
 log = logging.getLogger('courses')
@@ -66,6 +67,11 @@ class Shop:
 
     async def error(self, event):
         log.error('Handler xatosi: %s', type(event.exception).__name__)
+        if isinstance(event.exception, PyMongoError):
+            message = event.update.message or (event.update.callback_query.message if event.update.callback_query else None)
+            if message and message.chat.type == 'private':
+                with contextlib.suppress(TelegramAPIError):
+                    await message.answer('Baza bilan aloqa vaqtincha uzildi. Keyinroq qayta urinib ko‘ring.')
         return True
 
     async def whoami(self, message):
@@ -81,7 +87,7 @@ class Shop:
             except ValueError:
                 await message.answer('Kurs havolasi noto‘g‘ri.')
             return
-        rows = await self.db.rows('SELECT * FROM courses WHERE active=1 AND deleted=0 ORDER BY id')
+        rows = await self.db.rows('courses', {'active': 1, 'deleted': 0}, sort=[('id', 1)])
         items = [(f'📚 {c["name"]} — {money(c["price"])}', f'u:course:{c["id"]}') for c in rows]
         if message.from_user.id in self.cfg.admins:
             items.append(('⚙️ Admin panel', 'a:menu'))
@@ -90,7 +96,7 @@ class Shop:
                              reply_markup=keyboard(items) if items else None)
 
     async def show_course(self, message, cid):
-        c = await self.db.one('SELECT * FROM courses WHERE id=? AND active=1 AND deleted=0', (cid,))
+        c = await self.db.one('courses', {'id': cid, 'active': 1, 'deleted': 0})
         if not c:
             await message.answer('Kurs topilmadi yoki sotuvda emas.')
             return
@@ -118,17 +124,17 @@ class Shop:
                     if not o['bill_id']:
                         age = datetime.now(timezone.utc) - datetime.fromisoformat(o['created_at']).replace(tzinfo=timezone.utc)
                         if age > timedelta(hours=23):
-                            await self.db.execute("UPDATE orders SET status='review' WHERE id=?", (o['id'],))
+                            await self.db.update('orders', {'id': o['id']}, {'status': 'review'})
                             await self.alert(o, 'Eski noaniq buyurtma: Tezcheck kabinetida external_reference bo‘yicha solishtiring.')
                             raise PaymentError('Eski hisob holati noaniq. Adminga murojaat qiling.')
                         data = await self.api.create(o)
-                        await self.db.execute("UPDATE orders SET bill_id=?,payment_url=?,status='pending' WHERE id=?",
-                                              (data['bill']['id'], data['payment_url'], o['id']))
-                        o = await self.db.one('SELECT * FROM orders WHERE id=?', (o['id'],))
+                        await self.db.update('orders', {'id': o['id']}, {
+                            'bill_id': data['bill']['id'], 'payment_url': data['payment_url'], 'status': 'pending'})
+                        o = await self.db.one('orders', {'id': o['id']})
                     await call.message.answer(f'Buyurtma #{o["id"]}. Summa: {money(o["amount"])}\nTo‘lovdan so‘ng tekshirish tugmasini bosing.',
                         reply_markup=keyboard([('💳 To‘lov sahifasi', o['payment_url']), ('🔄 To‘lovni tekshirish', f'u:check:{o["id"]}')]))
                 elif action == 'check':
-                    o = await self.db.one('SELECT * FROM orders WHERE id=? AND user_id=?', (ident, call.from_user.id))
+                    o = await self.db.one('orders', {'id': ident, 'user_id': call.from_user.id})
                     if not o or not o['bill_id']:
                         raise PaymentError('Buyurtma topilmadi.')
                     if o['status'] == 'paid':
@@ -139,9 +145,12 @@ class Shop:
                         await call.message.answer('To‘lov hali tasdiqlanmadi. Birozdan keyin qayta tekshiring.')
         except (PaymentError, ValueError) as exc:
             await call.message.answer(escape(str(exc)))
+        except PyMongoError:
+            log.warning('MongoDB buyurtmani saqlash/tekshirish xatosi')
+            await call.message.answer('Baza bilan aloqa vaqtincha uzildi. Keyinroq qayta tekshiring; qayta to‘lov qilmang.')
 
     async def verify(self, o):
-        await self.db.execute('UPDATE orders SET last_checked=CURRENT_TIMESTAMP WHERE id=?', (o['id'],))
+        await self.db.update('orders', {'id': o['id']}, {'last_checked': now()})
         paid, pid = await self.api.check(o)
         if paid:
             await self.db.mark_paid(o, pid)
@@ -154,7 +163,7 @@ class Shop:
                 await self.bot.send_message(admin, f'⚠️ Buyurtma #{order["id"]}, foydalanuvchi {order["user_id"]}.\n{escape(reason)}')
 
     async def deliver(self, o, repeat=False):
-        p = await self.db.one('SELECT * FROM purchases WHERE order_id=?', (o['id'],))
+        p = await self.db.one('purchases', {'order_id': o['id']})
         if not p:
             return
         if p['status'] == 'joined':
@@ -171,16 +180,18 @@ class Shop:
             return
         if not p['invite_link']:
             # Persist before Telegram call: a crash must never trigger a second invite automatically.
-            await self.db.execute("UPDATE purchases SET status='creating' WHERE id=?", (p['id'],))
+            claim = await self.db.update('purchases', {'id': p['id'], 'status': 'waiting'}, {'status': 'creating'})
+            if not claim.modified_count:
+                return
             expiry = datetime.now(timezone.utc) + timedelta(hours=self.cfg.invite_hours)
             try:
                 invite = await self.bot.create_chat_invite_link(o['channel_chat_id'],
                     name=f'order-{o["id"]}', expire_date=expiry, creates_join_request=True)
-                await self.db.execute("UPDATE purchases SET invite_link=?,expires_at=?,status='ready' WHERE id=?",
-                                      (invite.invite_link, int(expiry.timestamp()), p['id']))
-                p = await self.db.one('SELECT * FROM purchases WHERE id=?', (p['id'],))
+                await self.db.update('purchases', {'id': p['id']}, {
+                    'invite_link': invite.invite_link, 'expires_at': int(expiry.timestamp()), 'status': 'ready'})
+                p = await self.db.one('purchases', {'id': p['id']})
             except TelegramAPIError as exc:
-                await self.db.execute("UPDATE purchases SET status='error' WHERE id=?", (p['id'],))
+                await self.db.update('purchases', {'id': p['id']}, {'status': 'error'})
                 await self.alert(o, 'Kanal taklifini yaratib bo‘lmadi: ' + type(exc).__name__)
                 with contextlib.suppress(TelegramAPIError):
                     await self.bot.send_message(o['user_id'], 'To‘lov tasdiqlandi. Kanalga kirish uchun adminga murojaat qiling. Buyurtma #' + str(o['id']))
@@ -188,13 +199,13 @@ class Shop:
         if repeat or not p['notified']:
             await self.bot.send_message(o['user_id'], '✅ Kurs xarid qilingan. Havolani ochib kirish so‘rovini yuboring. Faqat sizning IDingiz tasdiqlanadi.',
                                         reply_markup=keyboard([('🔐 Kurs kanaliga kirish', p['invite_link'])]))
-            await self.db.execute('UPDATE purchases SET notified=1 WHERE id=?', (p['id'],))
+            await self.db.update('purchases', {'id': p['id']}, {'notified': 1})
 
     async def join(self, request):
         link = request.invite_link.invite_link if request.invite_link else None
         if not link:
             return
-        p = await self.db.one("SELECT p.*,o.channel_chat_id FROM purchases p JOIN orders o ON o.id=p.order_id WHERE p.invite_link=? AND o.status='paid'", (link,))
+        p = await self.db.purchase_by_link(link)
         if not p:
             return
         if (p['user_id'] != request.from_user.id or p['channel_chat_id'] != request.chat.id or
@@ -202,7 +213,7 @@ class Shop:
             await request.decline()
             return
         await request.approve()
-        await self.db.execute("UPDATE purchases SET status='joined' WHERE id=?", (p['id'],))
+        await self.db.update('purchases', {'id': p['id']}, {'status': 'joined'})
         with contextlib.suppress(TelegramAPIError):
             await self.bot.revoke_chat_invite_link(request.chat.id, link)
 
@@ -240,7 +251,7 @@ class Shop:
             await call.message.answer('Kurs nomini kiriting (2–120 belgi). Bekor qilish: /cancel')
         elif action == 'list':
             page = max(0, int(bits[2]))
-            rows = await self.db.rows('SELECT * FROM courses WHERE deleted=0 ORDER BY id LIMIT 10 OFFSET ?', (page * 10,))
+            rows = await self.db.rows('courses', {'deleted': 0}, sort=[('id', 1)], skip=page * 10, limit=10)
             items = [(f'#{c["id"]} {c["name"]} ({"faol" if c["active"] else "nofaol"})', f'a:course:{c["id"]}') for c in rows]
             if page:
                 items.append(('⬅️ Oldingi', f'a:list:{page-1}'))
@@ -249,7 +260,7 @@ class Shop:
             await call.message.answer('Kurslar:', reply_markup=keyboard(items or [('Admin panel', 'a:menu')]))
         elif action == 'orders':
             page = max(0, int(bits[2]))
-            rows = await self.db.rows('SELECT o.*,p.status AS access FROM orders o LEFT JOIN purchases p ON p.order_id=o.id ORDER BY o.id DESC LIMIT 10 OFFSET ?', (page * 10,))
+            rows = await self.db.orders_page(page)
             text = '\n'.join(f'#{o["id"]} | user {o["user_id"]} | kurs {o["course_id"]}\n{money(o["amount"])} | {o["status"]} | kirish: {o["access"] or "yo‘q"}\nref: {o["external_reference"]}' for o in rows)
             items = [('Admin panel', 'a:menu')]
             if page:
@@ -258,25 +269,24 @@ class Shop:
                 items.append(('➡️ Keyingi', f'a:orders:{page+1}'))
             await call.message.answer(escape(text or 'Buyurtmalar yo‘q.'), reply_markup=keyboard(items))
         elif action == 'stats':
-            c = await self.db.one('SELECT COUNT(*) AS n FROM courses WHERE deleted=0')
-            o = await self.db.one("SELECT COUNT(*) AS n,COALESCE(SUM(status='paid'),0) AS paid,COALESCE(SUM(CASE WHEN status='paid' THEN amount ELSE 0 END),0) AS revenue FROM orders")
-            await call.message.answer(f'Kurslar: {c["n"]}\nBuyurtmalar: {o["n"]}\nMuvaffaqiyatli to‘lovlar: {o["paid"]}\nTushum (yalpi): {money(o["revenue"])}')
+            o = await self.db.stats()
+            await call.message.answer(f'Kurslar: {o["courses"]}\nBuyurtmalar: {o["n"]}\nMuvaffaqiyatli to‘lovlar: {o["paid"]}\nTushum (yalpi): {money(o["revenue"])}')
         elif action == 'save':
             if await state.get_state() != CourseForm.confirm.state:
                 await call.message.answer('Kiritish muddati tugagan. /admin orqali qayta boshlang.')
                 return
             d = await state.get_data()
             if d.get('edit_id'):
-                await self.db.course_change(uid, 'edit', 'UPDATE courses SET name=?,description=?,price=?,channel_chat_id=? WHERE id=? AND deleted=0',
-                    (d['name'], d['description'], d['price'], d['channel'], d['edit_id']))
+                await self.db.course_change(uid, 'edit', {'name': d['name'], 'description': d['description'],
+                    'price': d['price'], 'channel_chat_id': d['channel']}, cid=d['edit_id'])
             else:
-                await self.db.course_change(uid, 'add', 'INSERT INTO courses(name,description,price,channel_chat_id) VALUES(?,?,?,?)',
-                    (d['name'], d['description'], d['price'], d['channel']))
+                await self.db.course_change(uid, 'add', {'name': d['name'], 'description': d['description'],
+                    'price': d['price'], 'channel_chat_id': d['channel']})
             await state.clear()
             await call.message.answer('✅ Kurs saqlandi.')
         elif len(bits) >= 3:
             cid = int(bits[2])
-            c = await self.db.one('SELECT * FROM courses WHERE id=? AND deleted=0', (cid,))
+            c = await self.db.one('courses', {'id': cid, 'deleted': 0})
             if not c:
                 await call.message.answer('Kurs topilmadi.')
                 return
@@ -289,13 +299,13 @@ class Shop:
                 await state.set_state(CourseForm.name)
                 await call.message.answer('Yangi kurs nomini kiriting. Keyin tavsif, narx va kanal qayta kiritiladi. /cancel')
             elif action == 'toggle':
-                await self.db.course_change(uid, 'toggle', 'UPDATE courses SET active=1-active WHERE id=?', (cid,))
+                await self.db.course_change(uid, 'toggle', cid=cid)
                 await call.message.answer('Kurs holati o‘zgartirildi.')
             elif action == 'delete':
                 await call.message.answer('Kursni o‘chirishni tasdiqlaysizmi? Xaridlar tarixi saqlanadi.',
                                           reply_markup=keyboard([('Ha, o‘chirish', f'a:remove:{cid}'), ('Bekor qilish', f'a:course:{cid}')]))
             elif action == 'remove':
-                await self.db.course_change(uid, 'delete', 'UPDATE courses SET deleted=1,active=0 WHERE id=?', (cid,))
+                await self.db.course_change(uid, 'delete', cid=cid)
                 await call.message.answer('Kurs o‘chirildi. Eski to‘lovlar uchun kirish huquqi saqlanadi.')
 
     async def form(self, message, state: FSMContext):
@@ -346,20 +356,24 @@ class Shop:
     async def health(self, message):
         if message.from_user.id not in self.cfg.admins or message.chat.type != 'private':
             return
-        await self.db.audit(message.from_user.id, 'health', {})
-        await self.db.one('SELECT 1')
+        try:
+            await self.db.ping()
+            await self.db.audit(message.from_user.id, 'health', {})
+        except PyMongoError:
+            await message.answer('MongoDB Atlas: ❌ ulanishni va Network Access sozlamalarini tekshiring.')
+            return
         try:
             data = await self.api.request('GET', '/me')
             desk = data.get('cash_desk')
             ok = isinstance(desk, dict) and str(desk.get('code')) == self.cfg.desk and desk.get('currency') == 'UZS'
-            await message.answer('SQLite: ✅\nTelegram: ✅\nTezcheck: ' + ('✅ kalit va kassa mos.' if ok else '⚠️ kassa sozlamalarini tekshiring.'))
+            await message.answer('MongoDB Atlas: ✅\nTelegram: ✅\nTezcheck: ' + ('✅ kalit va kassa mos.' if ok else '⚠️ kassa sozlamalarini tekshiring.'))
         except PaymentError as exc:
-            await message.answer('SQLite: ✅\nTelegram: ✅\n' + escape(str(exc)))
+            await message.answer('MongoDB Atlas: ✅\nTelegram: ✅\n' + escape(str(exc)))
 
     async def poll(self):
         while True:
             try:
-                rows = await self.db.rows("SELECT * FROM orders WHERE status IN ('pending','paid') ORDER BY COALESCE(last_checked,'') ASC LIMIT 30")
+                rows = await self.db.rows('orders', {'status': {'$in': ['pending', 'paid']}}, sort=[('last_checked', 1)], limit=30)
                 for o in rows:
                     try:
                         async with self.payment_lock:
@@ -367,7 +381,7 @@ class Shop:
                                 if await self.verify(o):
                                     await self.deliver(o)
                             else:
-                                await self.db.execute('UPDATE orders SET last_checked=CURRENT_TIMESTAMP WHERE id=?', (o['id'],))
+                                await self.db.update('orders', {'id': o['id']}, {'last_checked': now()})
                                 await self.deliver(o)
                     except (PaymentError, TelegramAPIError) as exc:
                         log.warning('Tekshirish xatosi: buyurtma=%s tur=%s', o['id'], type(exc).__name__)
@@ -379,14 +393,14 @@ class Shop:
 
 async def main():
     cfg = Config.load()
-    db = Database(cfg.database)
+    db = Database(cfg.mongo_uri, cfg.database)
     await db.open()
     bot = Bot(cfg.token, default=DefaultBotProperties(parse_mode='HTML'))
     api = Tezcheck(cfg)
     task = None
     try:
         # Interrupted invite creation is intentionally handled by an admin, never recreated blindly.
-        await db.execute("UPDATE purchases SET status='error' WHERE status='creating'")
+        await db.update('purchases', {'status': 'creating'}, {'status': 'error'}, many=True)
         shop = Shop(cfg, db, api, bot)
         shop.username = (await bot.get_me()).username
         await bot.set_my_commands([BotCommand(command='start', description='Kurslar'), BotCommand(command='id', description='Telegram ID')])
@@ -418,6 +432,8 @@ if __name__ == '__main__':
     except (ValueError, KeyboardInterrupt) as exc:
         if isinstance(exc, ValueError):
             print(str(exc))
+    except PyMongoError:
+        print('MongoDB Atlas bilan ulanish/amaliyot bajarilmadi. URI, ruxsatlar va Network Access sozlamalarini tekshiring.')
 
 ````
 
@@ -441,6 +457,7 @@ class Config:
     desk: str
     base_url: str
     database: str
+    mongo_uri: str
     interval: int
     invite_hours: int
     emoji: str
@@ -448,9 +465,17 @@ class Config:
     @classmethod
     def load(cls):
         load_dotenv(ROOT / '.env')
-        required = ['BOT_TOKEN', 'ADMIN_IDS', 'TEZCHECK_API_KEY', 'TEZCHECK_CASH_DESK_CODE']
+        required = ['BOT_TOKEN', 'ADMIN_IDS', 'TEZCHECK_API_KEY', 'TEZCHECK_CASH_DESK_CODE', 'MONGODB_URI']
         if any(not os.getenv(k, '').strip() for k in required):
-            raise ValueError('.env ichida BOT_TOKEN, ADMIN_IDS va Tezcheck sozlamalarini to‘ldiring.')
+            raise ValueError('.env ichida BOT_TOKEN, ADMIN_IDS, MONGODB_URI va Tezcheck sozlamalarini to‘ldiring.')
+        mongo_uri = os.environ['MONGODB_URI'].strip()
+        if not mongo_uri.startswith(('mongodb+srv://', 'mongodb://')):
+            raise ValueError('MONGODB_URI MongoDB ulanish manzili bo‘lishi kerak.')
+        if '<' in mongo_uri or '>' in mongo_uri:
+            raise ValueError('MONGODB_URI ichidagi <db_username>/<db_password> o‘rniga haqiqiy ma’lumotlarni yozing.')
+        database = os.getenv('MONGODB_DATABASE', 'kurs_sotish_bot').strip()
+        if not database or any(c in database for c in '/\\. "$*<>:|?'):
+            raise ValueError('MONGODB_DATABASE nomi noto‘g‘ri.')
         admins = frozenset(int(x.strip()) for x in os.environ['ADMIN_IDS'].split(',') if x.strip())
         if not admins or any(x <= 0 for x in admins):
             raise ValueError('ADMIN_IDS musbat Telegram IDlardan iborat bo‘lsin.')
@@ -466,127 +491,180 @@ class Config:
             raise ValueError('POLL_INTERVAL >= 30, INVITE_TTL_HOURS 1–168 bo‘lsin.')
         return cls(os.environ['BOT_TOKEN'].strip(), admins, os.environ['TEZCHECK_API_KEY'].strip(),
                    os.environ['TEZCHECK_CASH_DESK_CODE'].strip(), base,
-                   str(ROOT / os.getenv('DATABASE_PATH', 'data/bot.db')), interval, hours, emoji)
+                   database, mongo_uri, interval, hours, emoji)
 
 ````
 
 ## database.py
 ````text
-import asyncio
-import json
 import uuid
-from pathlib import Path
+from datetime import datetime, timezone
 
-import aiosqlite
+from pymongo import AsyncMongoClient, ReturnDocument
+from pymongo.errors import DuplicateKeyError
+from pymongo.read_concern import ReadConcern
+from pymongo.write_concern import WriteConcern
 
-SCHEMA = '''
-PRAGMA journal_mode=WAL;
-PRAGMA foreign_keys=ON;
-PRAGMA busy_timeout=5000;
-CREATE TABLE IF NOT EXISTS courses (
- id INTEGER PRIMARY KEY, name TEXT NOT NULL, description TEXT NOT NULL,
- price INTEGER NOT NULL CHECK(price>0), channel_chat_id INTEGER NOT NULL,
- active INTEGER NOT NULL DEFAULT 1, deleted INTEGER NOT NULL DEFAULT 0,
- created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
-CREATE TABLE IF NOT EXISTS orders (
- id INTEGER PRIMARY KEY, user_id INTEGER NOT NULL, course_id INTEGER NOT NULL REFERENCES courses(id),
- amount INTEGER NOT NULL, channel_chat_id INTEGER NOT NULL, title TEXT NOT NULL,
- bill_id TEXT UNIQUE, payment_url TEXT, status TEXT NOT NULL DEFAULT 'creating',
- external_reference TEXT NOT NULL UNIQUE, payment_id TEXT UNIQUE,
- created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, paid_at TEXT, last_checked TEXT);
-CREATE UNIQUE INDEX IF NOT EXISTS one_open_order ON orders(user_id,course_id)
- WHERE status IN ('creating','pending','paid','review');
-CREATE INDEX IF NOT EXISTS orders_poll ON orders(status,last_checked);
-CREATE TABLE IF NOT EXISTS purchases (
- id INTEGER PRIMARY KEY, user_id INTEGER NOT NULL, course_id INTEGER NOT NULL REFERENCES courses(id),
- order_id INTEGER NOT NULL UNIQUE REFERENCES orders(id), invite_link TEXT UNIQUE,
- status TEXT NOT NULL DEFAULT 'waiting', expires_at INTEGER, notified INTEGER NOT NULL DEFAULT 0,
- created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, UNIQUE(user_id,course_id));
-CREATE TABLE IF NOT EXISTS admin_logs (
- id INTEGER PRIMARY KEY, admin_id INTEGER NOT NULL, action TEXT NOT NULL, details TEXT NOT NULL,
- created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
-CREATE INDEX IF NOT EXISTS admin_logs_time ON admin_logs(created_at);
-'''
+
+def now():
+    return datetime.now(timezone.utc).replace(tzinfo=None).isoformat(sep=' ', timespec='seconds')
 
 
 class Database:
-    def __init__(self, path):
-        self.path = path
-        self.lock = asyncio.Lock()
+    def __init__(self, uri, name):
+        self.uri, self.name = uri, name
 
     async def open(self):
-        Path(self.path).parent.mkdir(parents=True, exist_ok=True)
-        self.conn = await aiosqlite.connect(self.path, isolation_level=None)
-        self.conn.row_factory = aiosqlite.Row
-        await self.conn.executescript(SCHEMA)
+        self.client = AsyncMongoClient(self.uri, serverSelectionTimeoutMS=10000,
+                                       connectTimeoutMS=10000, socketTimeoutMS=20000)
+        self.db = self.client.get_database(self.name, write_concern=WriteConcern('majority'))
+        try:
+            await self.ping()
+            for collection in ('courses', 'orders', 'purchases', 'admin_logs'):
+                await self.db[collection].create_index('id', unique=True)
+            await self.db.orders.create_index([('user_id', 1), ('course_id', 1)], unique=True)
+            await self.db.orders.create_index('external_reference', unique=True)
+            for field in ('bill_id', 'payment_id'):
+                await self.db.orders.create_index(field, unique=True,
+                    partialFilterExpression={field: {'$type': 'string'}})
+            await self.db.orders.create_index([('status', 1), ('last_checked', 1)])
+            await self.db.courses.create_index([('deleted', 1), ('active', 1), ('id', 1)])
+            await self.db.purchases.create_index([('user_id', 1), ('course_id', 1)], unique=True)
+            await self.db.purchases.create_index('order_id', unique=True)
+            await self.db.purchases.create_index('invite_link', unique=True,
+                partialFilterExpression={'invite_link': {'$type': 'string'}})
+            await self.db.admin_logs.create_index('created_at')
+        except BaseException:
+            await self.client.close()
+            raise
 
     async def close(self):
-        await self.conn.close()
+        await self.client.close()
 
-    async def rows(self, sql, args=()):
-        async with self.lock:
-            async with self.conn.execute(sql, args) as cur:
-                return [dict(x) for x in await cur.fetchall()]
+    async def ping(self):
+        await self.client.admin.command('ping')
 
-    async def one(self, sql, args=()):
-        rows = await self.rows(sql, args)
-        return rows[0] if rows else None
+    async def next_id(self, collection):
+        counter = await self.db.counters.find_one_and_update({'_id': collection},
+            {'$inc': {'value': 1}}, upsert=True, return_document=ReturnDocument.AFTER)
+        return counter['value']
 
-    async def execute(self, sql, args=()):
-        async with self.lock:
-            cur = await self.conn.execute(sql, args)
-            return cur.lastrowid
+    async def one(self, collection, query):
+        return await self.db[collection].find_one(query, {'_id': 0})
+
+    async def rows(self, collection, query=None, sort=None, skip=0, limit=0):
+        cursor = self.db[collection].find(query or {}, {'_id': 0})
+        if sort:
+            cursor = cursor.sort(sort)
+        if skip:
+            cursor = cursor.skip(skip)
+        if limit:
+            cursor = cursor.limit(limit)
+        return [row async for row in cursor]
+
+    async def update(self, collection, query, values, many=False):
+        method = self.db[collection].update_many if many else self.db[collection].update_one
+        return await method(query, {'$set': values})
 
     async def audit(self, admin, action, details):
-        await self.execute('INSERT INTO admin_logs(admin_id,action,details) VALUES(?,?,?)',
-                           (admin, action, json.dumps(details, ensure_ascii=False)))
+        await self.db.admin_logs.insert_one({'id': await self.next_id('admin_logs'),
+            'admin_id': admin, 'action': action, 'details': details, 'created_at': now()})
 
-    async def course_change(self, admin, action, sql, args):
-        async with self.lock:
-            await self.conn.execute('BEGIN IMMEDIATE')
-            try:
-                cur = await self.conn.execute(sql, args)
-                await self.conn.execute('INSERT INTO admin_logs(admin_id,action,details) VALUES(?,?,?)',
-                                        (admin, action, json.dumps({'args': args, 'id': cur.lastrowid}, ensure_ascii=False)))
-                await self.conn.commit()
-                return cur.lastrowid
-            except BaseException:
-                await self.conn.rollback()
-                raise
+    async def transaction(self, callback):
+        async with self.client.start_session() as session:
+            return await session.with_transaction(callback, read_concern=ReadConcern('snapshot'),
+                                                  write_concern=WriteConcern('majority'))
+
+    async def course_change(self, admin, action, values=None, cid=None):
+        values = values or {}
+        ident = await self.next_id('courses') if action == 'add' else cid
+        log_id = await self.next_id('admin_logs')
+
+        async def change(session):
+            if action == 'add':
+                await self.db.courses.insert_one({'id': ident, **values, 'active': 1,
+                    'deleted': 0, 'created_at': now()}, session=session)
+            else:
+                query = {'id': ident, 'deleted': 0}
+                if action == 'toggle':
+                    result = await self.db.courses.update_one(query,
+                        [{'$set': {'active': {'$subtract': [1, '$active']}}}], session=session)
+                else:
+                    data = {'deleted': 1, 'active': 0} if action == 'delete' else values
+                    result = await self.db.courses.update_one(query, {'$set': data}, session=session)
+                if not result.matched_count:
+                    raise ValueError('Kurs topilmadi.')
+            await self.db.admin_logs.insert_one({'id': log_id, 'admin_id': admin,
+                'action': action, 'details': {'course_id': ident, 'values': values},
+                'created_at': now()}, session=session)
+            return ident
+
+        return await self.transaction(change)
 
     async def order(self, user, course):
-        async with self.lock:
-            await self.conn.execute('BEGIN IMMEDIATE')
-            try:
-                cur = await self.conn.execute("SELECT * FROM orders WHERE user_id=? AND course_id=? AND status IN ('creating','pending','paid','review')", (user, course))
-                row = await cur.fetchone()
-                if not row:
-                    cur = await self.conn.execute('SELECT * FROM courses WHERE id=? AND active=1 AND deleted=0', (course,))
-                    c = await cur.fetchone()
-                    if not c:
-                        raise ValueError('Kurs hozir sotuvda emas.')
-                    ref = 'ORD-' + uuid.uuid4().hex
-                    cur = await self.conn.execute('INSERT INTO orders(user_id,course_id,amount,channel_chat_id,title,external_reference) VALUES(?,?,?,?,?,?)',
-                        (user, course, c['price'], c['channel_chat_id'], c['name'], ref))
-                    cur = await self.conn.execute('SELECT * FROM orders WHERE id=?', (cur.lastrowid,))
-                    row = await cur.fetchone()
-                await self.conn.commit()
-                return dict(row)
-            except BaseException:
-                await self.conn.rollback()
+        query = {'user_id': user, 'course_id': course}
+        existing = await self.one('orders', query)
+        if existing:
+            return existing
+        c = await self.one('courses', {'id': course, 'active': 1, 'deleted': 0})
+        if not c:
+            raise ValueError('Kurs hozir sotuvda emas.')
+        order = {'id': await self.next_id('orders'), **query, 'amount': c['price'],
+            'channel_chat_id': c['channel_chat_id'], 'title': c['name'],
+            'external_reference': 'ORD-' + uuid.uuid4().hex, 'status': 'creating',
+            'bill_id': None, 'payment_url': None, 'payment_id': None,
+            'created_at': now(), 'paid_at': None, 'last_checked': ''}
+        try:
+            await self.db.orders.insert_one(order)
+        except DuplicateKeyError:
+            existing = await self.one('orders', query)
+            if not existing:
                 raise
+            return existing
+        order.pop('_id', None)
+        return order
 
     async def mark_paid(self, order, payment_id):
-        async with self.lock:
-            await self.conn.execute('BEGIN IMMEDIATE')
-            try:
-                await self.conn.execute("UPDATE orders SET status='paid',payment_id=?,paid_at=COALESCE(paid_at,CURRENT_TIMESTAMP) WHERE id=?", (payment_id, order['id']))
-                await self.conn.execute('INSERT OR IGNORE INTO purchases(user_id,course_id,order_id) VALUES(?,?,?)',
-                                        (order['user_id'], order['course_id'], order['id']))
-                await self.conn.commit()
-            except BaseException:
-                await self.conn.rollback()
-                raise
+        purchase_id = await self.next_id('purchases')
+
+        async def paid(session):
+            current = await self.db.orders.find_one({'id': order['id']}, session=session)
+            if not current or current['user_id'] != order['user_id'] or current['course_id'] != order['course_id']:
+                raise ValueError('Buyurtma topilmadi.')
+            if current.get('payment_id') and current['payment_id'] != payment_id:
+                raise ValueError('Buyurtmaning to‘lov IDsi o‘zgardi.')
+            await self.db.orders.update_one({'id': order['id']}, {'$set': {
+                'status': 'paid', 'payment_id': payment_id, 'paid_at': current.get('paid_at') or now()}}, session=session)
+            await self.db.purchases.update_one({'order_id': order['id']}, {'$setOnInsert': {
+                'id': purchase_id, 'user_id': order['user_id'], 'course_id': order['course_id'],
+                'order_id': order['id'], 'invite_link': None, 'status': 'waiting',
+                'expires_at': None, 'notified': 0, 'created_at': now()}}, upsert=True, session=session)
+
+        await self.transaction(paid)
+
+    async def purchase_by_link(self, link):
+        p = await self.one('purchases', {'invite_link': link})
+        if p:
+            o = await self.one('orders', {'id': p['order_id'], 'status': 'paid'})
+            if o:
+                return {**p, 'channel_chat_id': o['channel_chat_id']}
+        return None
+
+    async def orders_page(self, page):
+        rows = await self.rows('orders', sort=[('id', -1)], skip=page * 10, limit=10)
+        for order in rows:
+            p = await self.one('purchases', {'order_id': order['id']})
+            order['access'] = p['status'] if p else None
+        return rows
+
+    async def stats(self):
+        courses = await self.db.courses.count_documents({'deleted': 0})
+        count = await self.db.orders.count_documents({})
+        result = [x async for x in await self.db.orders.aggregate([
+            {'$match': {'status': 'paid'}}, {'$group': {'_id': None,
+                'paid': {'$sum': 1}, 'revenue': {'$sum': '$amount'}}}])]
+        return {'courses': courses, 'n': count, 'paid': result[0]['paid'] if result else 0,
+                'revenue': result[0]['revenue'] if result else 0}
 
 ````
 
@@ -673,7 +751,8 @@ class Tezcheck:
 ## requirements.txt
 ````text
 aiogram==3.29.0
-aiosqlite==0.21.0
+pymongo==4.13.2
+dnspython==2.7.0
 python-dotenv==1.1.1
 
 ````
@@ -685,7 +764,8 @@ ADMIN_IDS=123456789
 TEZCHECK_API_KEY=
 TEZCHECK_CASH_DESK_CODE=
 TEZCHECK_BASE_URL=https://api.tezcheck.uz/api/merchant/v1
-DATABASE_PATH=data/bot.db
+MONGODB_URI=
+MONGODB_DATABASE=kurs_sotish_bot
 POLL_INTERVAL=60
 INVITE_TTL_HOURS=24
 CUSTOM_EMOJI_ID=
@@ -706,26 +786,68 @@ __pycache__/
 ## tests/test_payments.py
 ````text
 import asyncio
-import tempfile
+import os
 import unittest
-from pathlib import Path
+import uuid
+
+from pymongo.errors import DuplicateKeyError
 
 from database import Database
 from tezcheck import PaymentError, Tezcheck
 
 
-class PaymentTests(unittest.IsolatedAsyncioTestCase):
-    async def asyncSetUp(self):
-        self.tmp = tempfile.TemporaryDirectory()
-        self.db = Database(str(Path(self.tmp.name) / 'test.db'))
-        await self.db.open()
-        self.cid = await self.db.course_change(1, 'add',
-            'INSERT INTO courses(name,description,price,channel_chat_id) VALUES(?,?,?,?)',
-            ('Python', 'Darslar', 150000, -1001234567890))
+class PaymentValidationTests(unittest.IsolatedAsyncioTestCase):
+    def setUp(self):
+        self.order = {'id': 1, 'amount': 150000, 'external_reference': 'ORD-test', 'bill_id': 'link_1'}
+        self.bill = {'id': 'link_1', 'external_reference': 'ORD-test', 'amount_minor': 15000000,
+                     'currency': 'UZS', 'paid': True, 'livemode': True, 'environment': 'live', 'state': 'expired'}
+        self.payment = {'id': 'pay_1', 'state': 'succeeded', 'amount_minor': 15000000, 'currency': 'UZS',
+                        'livemode': True, 'environment': 'live', 'refunded_amount_minor': 0}
+        self.client = object.__new__(Tezcheck)
 
-    async def asyncTearDown(self):
-        await self.db.close()
-        self.tmp.cleanup()
+        async def response(*args, **kwargs):
+            return {'bill': self.bill, 'payment': self.payment}
+
+        self.client.request = response
+
+    async def test_live_payment_passes_even_if_bill_expired(self):
+        self.assertEqual(await self.client.check(self.order), (True, 'pay_1'))
+
+    async def test_unpaid_never_passes(self):
+        self.bill['paid'] = False
+        self.assertEqual(await self.client.check(self.order), (False, None))
+
+    async def test_test_payment_is_rejected(self):
+        self.bill['livemode'] = False
+        with self.assertRaises(PaymentError):
+            await self.client.check(self.order)
+
+    async def test_wrong_amount_is_rejected(self):
+        self.payment['amount_minor'] = 1
+        with self.assertRaises(PaymentError):
+            await self.client.check(self.order)
+
+    async def test_wrong_reference_is_rejected(self):
+        self.bill['external_reference'] = 'OTHER'
+        with self.assertRaises(PaymentError):
+            await self.client.check(self.order)
+
+
+@unittest.skipUnless(os.getenv('MONGODB_TEST_URI'), 'MONGODB_TEST_URI berilmagan: Atlas integratsiya testlari o‘tkazib yuborildi.')
+class MongoDBTests(unittest.IsolatedAsyncioTestCase):
+    async def asyncSetUp(self):
+        # Never use the configured production database. Each test owns a new random test DB.
+        self.db = Database(os.environ['MONGODB_TEST_URI'], 'kurs_bot_test_' + uuid.uuid4().hex)
+        await self.db.open()
+        self.addAsyncCleanup(self.cleanup_database)
+        self.cid = await self.db.course_change(1, 'add', {
+            'name': 'Python', 'description': 'Darslar', 'price': 150000, 'channel_chat_id': -1001234567890})
+
+    async def cleanup_database(self):
+        try:
+            await self.db.client.drop_database(self.db.name)
+        finally:
+            await self.db.close()
 
     async def test_concurrent_checkout_and_restart(self):
         orders = await asyncio.gather(*(self.db.order(42, self.cid) for _ in range(10)))
@@ -738,54 +860,43 @@ class PaymentTests(unittest.IsolatedAsyncioTestCase):
         o = await self.db.order(42, self.cid)
         await self.db.mark_paid(o, 'pay_unique')
         await self.db.mark_paid(o, 'pay_unique')
-        self.assertEqual(len(await self.db.rows('SELECT * FROM purchases')), 1)
+        self.assertEqual(len(await self.db.rows('purchases')), 1)
         self.assertEqual((await self.db.order(42, self.cid))['status'], 'paid')
+        await self.db.update('purchases', {'order_id': o['id']}, {'invite_link': 'https://t.me/+saved', 'status': 'ready'})
+        await self.db.mark_paid(o, 'pay_unique')
+        self.assertEqual((await self.db.one('purchases', {'order_id': o['id']}))['invite_link'], 'https://t.me/+saved')
+
+    async def test_duplicate_payment_rolls_back(self):
+        first = await self.db.order(42, self.cid)
+        second = await self.db.order(43, self.cid)
+        await self.db.mark_paid(first, 'pay_unique')
+        with self.assertRaises(DuplicateKeyError):
+            await self.db.mark_paid(second, 'pay_unique')
+        self.assertEqual((await self.db.one('orders', {'id': second['id']}))['status'], 'creating')
+        self.assertIsNone(await self.db.one('purchases', {'order_id': second['id']}))
+
+    async def test_purchase_failure_rolls_back_paid_status(self):
+        o = await self.db.order(42, self.cid)
+        await self.db.db.purchases.insert_one({'id': 1000, 'user_id': 42, 'course_id': self.cid, 'order_id': -1})
+        with self.assertRaises(DuplicateKeyError):
+            await self.db.mark_paid(o, 'pay_unique')
+        self.assertEqual((await self.db.one('orders', {'id': o['id']}))['status'], 'creating')
 
     async def test_order_snapshots_survive_course_edit_and_delete(self):
         o = await self.db.order(42, self.cid)
-        await self.db.course_change(1, 'edit', 'UPDATE courses SET price=200000,channel_chat_id=-100999,deleted=1 WHERE id=?', (self.cid,))
+        await self.db.course_change(1, 'edit', {'price': 200000, 'channel_chat_id': -100999}, cid=self.cid)
+        await self.db.course_change(1, 'delete', cid=self.cid)
         same = await self.db.order(42, self.cid)
         self.assertEqual(same['amount'], 150000)
         self.assertEqual(same['channel_chat_id'], o['channel_chat_id'])
+        self.assertEqual(len(await self.db.rows('admin_logs')), 3)
 
-    async def test_payment_validation(self):
+    async def test_invite_claim_is_atomic(self):
         o = await self.db.order(42, self.cid)
-        o['bill_id'] = 'link_1'
-        client = object.__new__(Tezcheck)
-        bill = {'id': 'link_1', 'external_reference': o['external_reference'], 'amount_minor': 15000000,
-                'currency': 'UZS', 'paid': True, 'livemode': True, 'environment': 'live', 'state': 'expired'}
-        payment = {'id': 'pay_1', 'state': 'succeeded', 'amount_minor': 15000000, 'currency': 'UZS',
-                   'livemode': True, 'environment': 'live', 'refunded_amount_minor': 0}
-
-        async def response(*args, **kwargs):
-            return {'bill': bill, 'payment': payment}
-
-        client.request = response
-        self.assertEqual(await client.check(o), (True, 'pay_1'))
-        bill['livemode'] = False
-        with self.assertRaises(PaymentError):
-            await client.check(o)
-        bill['livemode'] = True
-        payment['amount_minor'] = 1
-        with self.assertRaises(PaymentError):
-            await client.check(o)
-        payment['amount_minor'] = 15000000
-        bill['external_reference'] = 'OTHER'
-        with self.assertRaises(PaymentError):
-            await client.check(o)
-
-    async def test_unpaid_never_passes(self):
-        o = await self.db.order(42, self.cid)
-        o['bill_id'] = 'link_1'
-        client = object.__new__(Tezcheck)
-
-        async def response(*args, **kwargs):
-            return {'bill': {'id': 'link_1', 'external_reference': o['external_reference'], 'amount_minor': 15000000,
-                             'currency': 'UZS', 'paid': False, 'livemode': True}}
-
-        client.request = response
-        self.assertEqual(await client.check(o), (False, None))
-        self.assertFalse(await self.db.rows('SELECT * FROM purchases'))
+        await self.db.mark_paid(o, 'pay_unique')
+        results = await asyncio.gather(*(self.db.update('purchases',
+            {'order_id': o['id'], 'status': 'waiting'}, {'status': 'creating'}) for _ in range(10)))
+        self.assertEqual(sum(result.modified_count for result in results), 1)
 
 
 if __name__ == '__main__':
@@ -797,7 +908,7 @@ if __name__ == '__main__':
 ````text
 # Telegram orqali kurs sotish
 
-Python 3.11+ va SQLite asosidagi aiogram 3 bot. Boshlash buyrug‘i: `python main.py`.
+Python 3.11+ va MongoDB Atlas asosidagi aiogram 3 bot. Boshlash buyrug‘i: `python main.py`.
 
 ## Tuzilishi
 
@@ -805,14 +916,14 @@ Python 3.11+ va SQLite asosidagi aiogram 3 bot. Boshlash buyrug‘i: `python mai
 kurs_sotish_bot/
   main.py                  Telegram menyulari, admin suhbatlari va fon vazifasi
   config.py                .env konfiguratsiyasi
-  database.py              SQLite sxemasi va tranzaksiyalar
+  database.py              MongoDB kolleksiyalari, indekslar va tranzaksiyalar
   tezcheck.py               Merchant API mijozi
   requirements.txt
   .env.example
   .gitignore
   README.md
   tests/test_payments.py
-  data/bot.db               birinchi ishga tushirishda yaratiladi
+  FULL_CODE.md             barcha fayllar kodining birlashtirilgan nusxasi
 ```
 
 ## Windows (PowerShell)
@@ -855,12 +966,28 @@ python main.py
 - `TEZCHECK_API_KEY`: Tezcheck savdogar kabinetida API kalit yarating.
 - `TEZCHECK_CASH_DESK_CODE`: kabinetdagi kassa kodi; bu kassa IDsi emas.
 - `TEZCHECK_BASE_URL`: namunadagi rasmiy HTTPS manzil.
-- `DATABASE_PATH`: SQLite faylining joyi; `.env`dan nisbiy yo‘l berilsa loyiha papkasiga nisbatan olinadi.
+- `MONGODB_URI`: Atlas kabinetidagi Connect → Drivers bo‘limidan olingan maxfiy ulanish manzili.
+- `MONGODB_DATABASE`: baza nomi, odatda `kurs_sotish_bot`.
 - `POLL_INTERVAL`: tekshirishlar orasidagi soniyalar, kamida 30.
 - `INVITE_TTL_HOURS`: kirish havolasi muddati, 1–168 soat.
 - `CUSTOM_EMOJI_ID`: ixtiyoriy haqiqiy Telegram custom emoji IDsi. Bo‘sh bo‘lsa oddiy emoji ishlaydi. Telegram hisob/bot cheklovlariga qarab custom emoji oddiy emoji sifatida ko‘rinishi mumkin.
 
-`.env` va SQLite faylini oshkor qilmang. Loglarda token, API javobi va to‘lov/taklif URLlari chiqarilmaydi.
+`.env` va MongoDB ulanish manzilini oshkor qilmang. Loglarda token, MongoDB URI, API javobi va to‘lov/taklif URLlari chiqarilmaydi.
+
+## MongoDB Atlas sozlash
+
+1. [MongoDB Atlas](https://www.mongodb.com/atlas) hisobingizda loyiha va klaster yarating.
+2. Database Access orqali baza foydalanuvchisini yarating. Bot uchun `kurs_sotish_bot` bazasida `readWrite` huquqini bering.
+3. Network Access bo‘limida bot ishlaydigan kompyuter/serverning tashqi IP manzilini ruxsat ro‘yxatiga qo‘shing. [Atlas IP access list hujjati](https://www.mongodb.com/docs/atlas/security/add-ip-address-to-list/).
+4. Connect → Drivers → Python orqali connection stringni oling. Username va parolni o‘zingizniki bilan almashtiring. Paroldagi maxsus belgilar URI uchun percent-encode qilinishi kerak.
+5. `.env`ga yozing. Quyidagilar faqat format namunasi, haqiqiy kalitlar emas:
+
+```dotenv
+MONGODB_URI="mongodb+srv://BOT_USER:ENCODED_PASSWORD@YOUR_CLUSTER.mongodb.net/?retryWrites=true&w=majority"
+MONGODB_DATABASE=kurs_sotish_bot
+```
+
+Bot bazani, `courses`, `orders`, `purchases`, `admin_logs` va raqamli IDlar uchun `counters` kolleksiyasini avtomatik yaratadi. Ulanish uchun internet zarur. PyMongo Async ishlatiladi; [rasmiy tranzaksiya hujjati](https://www.mongodb.com/docs/languages/python/pymongo-driver/current/crud/transactions/). Tranzaksiyalar uchun replica set kerak; Atlas klasteridan foydalaning, standalone lokal MongoDB mos emas. Eski SQLite fayli bo‘lsa, uning ma’lumotlari avtomatik import qilinmaydi.
 
 Yopiq kanal yarating va botni **Invite users** huquqi bilan admin qiling. Kanalda ochiq username bo‘lmasin. Kanal postini botga yuborib chat ID aniqlash mumkin; ishonchli Telegram Bot API `getUpdates` javobida `channel_post.chat.id` qiymati ham ko‘rinadi. Polling ishlayotgan paytda ikkinchi `getUpdates` chaqiruvini ishlatmang. Kanal IDsi odatda `-100` bilan boshlanadi. Uni kurs qo‘shish suhbatida kiriting; bot kanal turi va o‘z huquqlarini tekshiradi.
 
@@ -886,7 +1013,7 @@ Kirish havolasi muddati cheklangan **join request** havolasi: bot faqat to‘lag
 
 Telegramga taklif yaratish paytida jarayon uzilsa, yangi havola avtomatik yaratilmaydi: admin yordam beradi. Kanal huquqi xatosi haqida adminlarga xabar yuboriladi. Havola muddati o‘tgan yoki `error` holatidagi haqiqiy xaridorga admin kabinetdagi tekshiruvdan so‘ng qo‘lda yordam beradi. To‘langan foydalanuvchini qayta to‘lashga majburlamang. Bot bloklangan bo‘lsa xabar yetkazish keyingi fon aylanishida qayta uriniladi.
 
-Faqat bitta bot jarayonini ishga tushiring. Buyurtmalar, xaridlar va audit doimiy; tugallanmagan admin suhbatlari xotirada, restartdan keyin qayta boshlanadi. SQLite joylashgan disk doimiy bo‘lsin. Ishlayotgan WAL bazasini nusxalashda SQLite backup usulidan foydalaning yoki botni to‘xtatib nusxalang. Bu bot refund/chargebackdan keyin kanal a’zosini avtomatik chiqarishni bajarmaydi; keyingi qaytarishlarni admin nazorat qiladi.
+Faqat bitta bot jarayonini ishga tushiring. Buyurtmalar, xaridlar va audit Atlasda doimiy saqlanadi; tugallanmagan admin suhbatlari xotirada, restartdan keyin qayta boshlanadi. Bir user/kurs uchun bitta order saqlanadi va qayta ishlatiladi. To‘lov va xarid yozuvlari, shuningdek kurs o‘zgarishi va uning auditi bir tranzaksiyada yoziladi. Noyob indekslar bill, payment, xarid va havola takrorlanishini cheklaydi. Taklif yaratish huquqi atomar yangilash bilan olinadi. Bu bot refund/chargebackdan keyin kanal a’zosini avtomatik chiqarishni bajarmaydi; keyingi qaytarishlarni admin nazorat qiladi.
 
 ## Test
 
@@ -894,7 +1021,19 @@ Faqat bitta bot jarayonini ishga tushiring. Buyurtmalar, xaridlar va audit doimi
 python -m unittest discover -s tests -v
 ```
 
-Testlar bir vaqtdagi xarid, restartdan keyingi buyurtma, takroriy tasdiqlash, kurs o‘zgarishidan mustaqil order nusxasi, test to‘lovi va noto‘g‘ri summani rad etishni tekshiradi. Haqiqiy Telegram/Tezcheck tarmog‘iga murojaat qilmaydi.
+API validatsiya testlari tarmoqsiz ishlaydi. Baza testlari `MONGODB_TEST_URI` berilmasa o‘tkazib yuboriladi. Atlas integratsiya testlari bir vaqtdagi xarid, restart, takroriy to‘lov, tranzaksiya rollback, kurs nusxasi, audit va taklif uchun atomar himoyani tekshiradi. Telegram/Tezcheck tarmog‘iga murojaat qilinmaydi.
+
+Integratsiya testlari uchun alohida test klasterida `kurs_bot_test_` prefiksli vaqtinchalik bazalarni yaratish/o‘chirish huquqi kerak. Har bir test noyob vaqtinchalik baza yaratadi va tugagach o‘chiradi. Test URI oddiy `.env`dan avtomatik o‘qilmaydi; muhit o‘zgaruvchisi qilib bering:
+
+```powershell
+$env:MONGODB_TEST_URI = 'ATLAS_TEST_CONNECTION_STRING'
+python -m unittest discover -s tests -v
+```
+
+```bash
+export MONGODB_TEST_URI='ATLAS_TEST_CONNECTION_STRING'
+python -m unittest discover -s tests -v
+```
 
 Qo‘lda yakuniy ssenariy:
 
