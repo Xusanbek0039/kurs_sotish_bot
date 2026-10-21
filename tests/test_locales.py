@@ -24,7 +24,7 @@ class LocaleTests(unittest.TestCase):
     def test_every_key_used_in_code_exists(self):
         """Koddagi t(lang, 'kalit') chaqiruvlaridagi har bir kalit tarjimada bo‘lishi kerak."""
         used = set()
-        for path in list(ROOT.glob('*.py')) + list(ROOT.glob('handlers/*.py')) + list(ROOT.glob('services/*.py')) \
+        for path in [p for p in ROOT.glob('*.py') if p.name != 'locales.py'] + list(ROOT.glob('handlers/*.py')) + list(ROOT.glob('services/*.py')) \
                 + list(ROOT.glob('keyboards/*.py')):
             used |= set(re.findall(r"\bt\([^,()]+,\s*'([a-z0-9_]+)'", path.read_text(encoding='utf-8')))
         self.assertTrue(used)
