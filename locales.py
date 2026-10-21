@@ -301,28 +301,16 @@ TEXTS: dict[str, dict[str, str]] = {
 
         # bezak (stiker / custom emoji)
         'btn_admin_appearance': '🎨 Bezak: stiker va emoji',
-        'appear_title': '🎨 <b>Bezak</b>
-
-'
+        'appear_title': '🎨 <b>Bezak</b>\n\n'
                         'Botga <b>stiker</b> yoki <b>custom emoji</b> (Premium) yuboring — ID’ni o‘zim aniqlayman va '
-                        'qayerga qo‘yishni so‘rayman. Hech narsa nusxalash shart emas.
-
-{items}',
+                        'qayerga qo‘yishni so‘rayman. Hech narsa nusxalash shart emas.\n\n{items}',
         'appear_name_sticker_welcome': '👋 Salomlashish stikeri',
         'appear_name_sticker_success': '🎉 Xariddan keyingi stiker',
         'appear_name_emoji_course': '📚 Kurs emojisi',
         'appear_name_emoji_payment': '💳 To‘lov emojisi',
         'appear_name_emoji_success': '✅ Muvaffaqiyat emojisi',
-        'appear_sticker': '🖼 <b>Stiker qabul qilindi</b>
-
-file_id: <code>{file_id}</code>
-
-Qayerga qo‘yamiz? 👇',
-        'appear_emoji': '✨ <b>Custom emoji qabul qilindi</b>
-
-ID: <code>{emoji_id}</code>{others}
-
-'
+        'appear_sticker': '🖼 <b>Stiker qabul qilindi</b>\n\nfile_id: <code>{file_id}</code>\n\nQayerga qo‘yamiz? 👇',
+        'appear_emoji': '✨ <b>Custom emoji qabul qilindi</b>\n\nID: <code>{emoji_id}</code>{others}\n\n'
                         'Birinchisini qayerga qo‘yamiz? 👇',
         'appear_saved': '✅ Saqlandi: {name}',
         'appear_saved_preview': '✅ <b>{name}</b> yangilandi va darhol ishlay boshladi. {preview}',
@@ -621,28 +609,16 @@ ID: <code>{emoji_id}</code>{others}
         'receipt_already': 'Этот чек уже рассмотрен: {status}',
 
         'btn_admin_appearance': '🎨 Оформление: стикеры и эмодзи',
-        'appear_title': '🎨 <b>Оформление</b>
-
-'
+        'appear_title': '🎨 <b>Оформление</b>\n\n'
                         'Отправьте боту <b>стикер</b> или <b>custom emoji</b> (Premium) — я сам определю ID и '
-                        'спрошу, куда его поставить. Ничего копировать не нужно.
-
-{items}',
+                        'спрошу, куда его поставить. Ничего копировать не нужно.\n\n{items}',
         'appear_name_sticker_welcome': '👋 Стикер приветствия',
         'appear_name_sticker_success': '🎉 Стикер после покупки',
         'appear_name_emoji_course': '📚 Эмодзи курса',
         'appear_name_emoji_payment': '💳 Эмодзи оплаты',
         'appear_name_emoji_success': '✅ Эмодзи успеха',
-        'appear_sticker': '🖼 <b>Стикер получен</b>
-
-file_id: <code>{file_id}</code>
-
-Куда поставить? 👇',
-        'appear_emoji': '✨ <b>Custom emoji получен</b>
-
-ID: <code>{emoji_id}</code>{others}
-
-'
+        'appear_sticker': '🖼 <b>Стикер получен</b>\n\nfile_id: <code>{file_id}</code>\n\nКуда поставить? 👇',
+        'appear_emoji': '✨ <b>Custom emoji получен</b>\n\nID: <code>{emoji_id}</code>{others}\n\n'
                         'Куда поставить первый? 👇',
         'appear_saved': '✅ Сохранено: {name}',
         'appear_saved_preview': '✅ <b>{name}</b> обновлён и уже работает. {preview}',
