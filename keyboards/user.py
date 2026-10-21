@@ -52,6 +52,8 @@ def course_kb(lang: str, course_id: int, owned: bool, purchasable: bool, setting
     elif purchasable:
         b.row(_btn(t(lang, 'btn_pay'), UserCb(action='buy', id=course_id), style='success',
                    icon=settings.custom_emoji.get('payment')))
+        if settings.card_number:
+            b.row(_btn(t(lang, 'btn_pay_card'), UserCb(action='card', id=course_id)))
     b.row(*support_button(lang, settings))
     b.row(_btn(t(lang, 'btn_all_courses'), UserCb(action='catalog')), _btn(LANGUAGE_BUTTON, UserCb(action='lang')))
     return b.as_markup()
@@ -62,8 +64,18 @@ def payment_kb(lang: str, order: dict, settings) -> InlineKeyboardMarkup:
     b.row(_btn(t(lang, 'btn_pay_now'), url=order['payment_url'], style='success',
                icon=settings.custom_emoji.get('payment')))
     b.row(_btn(t(lang, 'btn_check_payment'), UserCb(action='check', id=order['id']), style='primary'))
+    if settings.card_number:
+        b.row(_btn(t(lang, 'btn_pay_card'), UserCb(action='card', id=order['course_id'])))
     b.row(*support_button(lang, settings))
     b.row(_btn(t(lang, 'btn_my_courses'), UserCb(action='mine')), _btn(LANGUAGE_BUTTON, UserCb(action='lang')))
+    return b.as_markup()
+
+
+def card_payment_kb(lang: str, course_id: int, settings) -> InlineKeyboardMarkup:
+    b = InlineKeyboardBuilder()
+    b.row(*support_button(lang, settings))
+    b.row(_btn(t(lang, 'btn_back'), UserCb(action='course', id=course_id)),
+          _btn(t(lang, 'btn_main_menu'), UserCb(action='menu')))
     return b.as_markup()
 
 

@@ -9,11 +9,12 @@ from aiogram import F, Router
 from aiogram.exceptions import TelegramAPIError
 from aiogram.filters import Command, CommandObject, CommandStart
 from aiogram.fsm.context import FSMContext
+from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import CallbackQuery, Message
 
 from keyboards.callbacks import LangCb, UserCb
 from keyboards.common import language_kb, main_reply_kb
-from keyboards.user import (CATALOG_PAGE, back_to_menu_kb, catalog_kb, course_kb, main_menu_kb,
+from keyboards.user import (CATALOG_PAGE, back_to_menu_kb, card_payment_kb, catalog_kb, course_kb, main_menu_kb,
                             my_courses_kb, payment_kb)
 from locales import LANGUAGE_BUTTON, LANGUAGE_PROMPT, all_variants, t
 from services.payments import PaymentService
@@ -25,6 +26,11 @@ router = Router(name='user')
 
 CHECK_COOLDOWN = 5.0
 _last_check: dict[int, float] = {}
+RECEIPT_DOCUMENT_TYPES = ('image/', 'application/pdf')
+
+
+class CardPay(StatesGroup):
+    receipt = State()        # karta rekvizitlari ko‘rsatildi, chek skrinshoti kutilmoqda
 
 
 def _support(lang: str, settings) -> str:
@@ -50,9 +56,9 @@ async def cmd_start(message: Message, command: CommandObject, state: FSMContext,
 
 async def _after_start(message: Message, payload: str, lang: str, is_admin: bool, settings,
                        first_name: str | None, db, payments: PaymentService):
-    if settings.sticker_welcome and not payload:
+    if settings.stickers.get('welcome') and not payload:
         with contextlib.suppress(TelegramAPIError):
-            await message.answer_sticker(settings.sticker_welcome)
+            await message.answer_sticker(settings.stickers['welcome'])
     await message.answer(t(lang, 'welcome', emoji=emoji(settings, 'course', '✨'), name=h(first_name or '')),
                          reply_markup=main_reply_kb(lang, is_admin))
     kind, _, raw = payload.partition('_')
@@ -215,8 +221,55 @@ async def check_cb(call: CallbackQuery, callback_data: UserCb, lang: str, settin
     key = {'paid': 'status_check_paid', 'pending': 'status_check_pending', 'expired': 'status_check_expired',
            'test': 'status_check_test', 'review': 'status_check_review', 'no_bill': 'status_check_no_bill'}.get(
         result, 'status_check_error')
-    markup = payment_kb(lang, order, settings) if result == 'pending' and order['payment_url'] else back_to_menu_kb(lang, settings)
+    if result == 'pending' and order['payment_url']:
+        markup = payment_kb(lang, order, settings)
+    elif result == 'expired':
+        # Eski havola o‘lik — bir bosishda yangi hisob yaratish tugmasi.
+        markup = course_kb(lang, order['course_id'], False, True, settings)
+    else:
+        markup = back_to_menu_kb(lang, settings)
     await call.message.answer(t(lang, key, support=_support(lang, settings)), reply_markup=markup)
+
+
+# ------------------------------------------------------------------ karta + chek
+@router.callback_query(UserCb.filter(F.action == 'card'))
+async def card_cb(call: CallbackQuery, callback_data: UserCb, state: FSMContext, db, lang: str, settings):
+    if not settings.card_number:
+        await call.answer(t(lang, 'outdated_button'), show_alert=True)
+        return
+    await call.answer()
+    kind, order = await db.get_or_create_open_order(call.from_user.id, callback_data.id)
+    if kind == 'purchased':
+        await show(call, t(lang, 'already_purchased'), back_to_menu_kb(lang, settings))
+        return
+    if kind == 'unavailable':
+        await show(call, t(lang, 'course_unavailable'), back_to_menu_kb(lang, settings))
+        return
+    course = await db.get_course(order['course_id'], include_deleted=True)
+    holder = f'\n👤 {h(settings.card_holder)}' if settings.card_holder else ''
+    await state.set_state(CardPay.receipt)
+    await state.update_data(card_order=order['id'])
+    await show(call, t(lang, 'card_payment', course=h(course_name(course, lang) if course else order['course_title']),
+                       order_id=order['id'], amount=money(order['amount_uzs'], lang), card=settings.card_number,
+                       holder=holder),
+               card_payment_kb(lang, order['course_id'], settings))
+
+
+@router.message(CardPay.receipt, F.photo | F.document)
+async def receipt_msg(message: Message, state: FSMContext, lang: str, settings, payments: PaymentService):
+    if message.photo:
+        file_id, file_type = message.photo[-1].file_id, 'photo'
+    elif (message.document.mime_type or '').startswith(RECEIPT_DOCUMENT_TYPES):
+        file_id, file_type = message.document.file_id, 'document'
+    else:
+        await message.answer(t(lang, 'receipt_wrong_type'))
+        return
+    data = await state.get_data()
+    result = await payments.submit_receipt(data.get('card_order', 0), message.from_user.id, file_id, file_type)
+    if result != 'busy':
+        await state.clear()
+    key = {'sent': 'receipt_received', 'busy': 'receipt_busy', 'paid': 'already_purchased'}.get(result, 'outdated_button')
+    await message.answer(t(lang, key), reply_markup=back_to_menu_kb(lang, settings))
 
 
 # ------------------------------------------------------------------ kurslarim
@@ -270,3 +323,9 @@ async def link_cb(call: CallbackQuery, callback_data: UserCb, lang: str, setting
     else:
         await call.answer()
         await call.message.answer(t(lang, 'link_failed', support=_support(lang, settings)))
+
+
+@router.message(CardPay.receipt)
+async def receipt_expected(message: Message, lang: str):
+    # Oxirida ro‘yxatdan o‘tgan: menyu tugmalari va buyruqlar chek kutilayotganda ham ishlaydi.
+    await message.answer(t(lang, 'receipt_wrong_type'))

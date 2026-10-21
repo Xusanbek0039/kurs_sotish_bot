@@ -37,9 +37,11 @@ class Settings:
     default_language: str = 'uz'
     payment_check_interval: int = 60
     invite_link_ttl_hours: int = 24
-    custom_emoji: Mapping[str, str] = field(default_factory=dict)
-    sticker_welcome: str = ''
-    sticker_success: str = ''
+    # Ikkalasi ham o‘zgaruvchan lug‘at: admin botga stiker/emoji yuborib, ularni ish paytida almashtiradi.
+    custom_emoji: dict[str, str] = field(default_factory=dict)     # course | payment | success
+    stickers: dict[str, str] = field(default_factory=dict)         # welcome | success
+    card_number: str = ''         # bo‘sh bo‘lsa, karta + chek orqali to‘lov o‘chiq
+    card_holder: str = ''
 
     def secrets(self) -> list[str]:
         """Loglardan yashiriladigan qiymatlar."""
@@ -124,6 +126,12 @@ def load_settings(env: Mapping[str, str | None] | None = None) -> Settings:
             # Talabga ko‘ra: noto‘g‘ri ID botni to‘xtatmaydi, oddiy emoji ishlatiladi.
             log.warning('%s noto‘g‘ri (faqat raqam bo‘lishi kerak) — oddiy emoji ishlatiladi.', name)
 
+    card_number = re.sub(r'[\s-]', '', _get(env, 'CARD_NUMBER'))
+    if card_number and not re.fullmatch(r'\d{16}', card_number):
+        raise ConfigError('CARD_NUMBER 16 xonali karta raqami bo‘lishi kerak (masalan, 8600 1234 5678 9012).')
+    if card_number:
+        card_number = ' '.join(card_number[i:i + 4] for i in range(0, 16, 4))
+
     return Settings(
         bot_token=token,
         admin_ids=admins,
@@ -136,6 +144,8 @@ def load_settings(env: Mapping[str, str | None] | None = None) -> Settings:
         payment_check_interval=_int(env, 'PAYMENT_CHECK_INTERVAL', 'POLL_INTERVAL', default=60, low=15, high=3600),
         invite_link_ttl_hours=_int(env, 'INVITE_LINK_TTL_HOURS', 'INVITE_TTL_HOURS', default=24, low=1, high=168),
         custom_emoji=emoji,
-        sticker_welcome=_get(env, 'STICKER_WELCOME_FILE_ID'),
-        sticker_success=_get(env, 'STICKER_SUCCESS_FILE_ID'),
+        stickers={k: v for k, v in (('welcome', _get(env, 'STICKER_WELCOME_FILE_ID')),
+                                    ('success', _get(env, 'STICKER_SUCCESS_FILE_ID'))) if v},
+        card_number=card_number,
+        card_holder=_get(env, 'CARD_HOLDER')[:64],
     )

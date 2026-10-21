@@ -5,6 +5,7 @@ yuborsa ham bu handlerlarga yetib kelmaydi.
 """
 from __future__ import annotations
 
+import contextlib
 import json
 import logging
 import re
@@ -491,6 +492,28 @@ async def resend_cb(call: CallbackQuery, callback_data: AdminCb, db: Database, l
     await call.answer(t(lang, 'resend_result', result=t(lang, f'result_{result}')).replace('<b>', '').replace('</b>', ''),
                       show_alert=True)
     await _order_card(call, db, lang, purchase['order_id'])
+
+
+@router.callback_query(AdminCb.filter(F.action.in_({'rcok', 'rcno'})))
+async def receipt_decide_cb(call: CallbackQuery, callback_data: AdminCb, lang: str, payments: PaymentService):
+    """Karta orqali to‘lov cheki: ✅ tasdiqlash (xarid + havola) yoki ❌ rad etish."""
+    approve = callback_data.action == 'rcok'
+    status, receipt = await payments.decide_receipt(callback_data.id, call.from_user.id, approve)
+    if status == 'not_found':
+        await call.answer(t(lang, 'result_not_found'), show_alert=True)
+        return
+    verdict = t(lang, f'receipt_status_{receipt["status"]}')
+    if status == 'already':
+        await call.answer(t(lang, 'receipt_already', status=verdict), show_alert=True)
+    else:
+        await call.answer(verdict)
+    # Tugmalarni olib tashlab, qarorni chek izohiga yozamiz (boshqa adminlar xabarida tugmalar qoladi,
+    # lekin ikkinchi bosish “allaqachon ko‘rib chiqilgan” deb javob beradi).
+    if isinstance(call.message, Message):
+        caption = (call.message.html_text or '') + '\n\n' + t(lang, 'receipt_decided', status=verdict,
+                                                              admin_id=receipt['admin_id'])
+        with contextlib.suppress(TelegramAPIError):
+            await call.message.edit_caption(caption=caption, reply_markup=None)
 
 
 @router.callback_query(AdminCb.filter(F.action == 'undeliv'))

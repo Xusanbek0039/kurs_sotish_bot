@@ -109,6 +109,28 @@ CREATE TABLE IF NOT EXISTS course_views (
     PRIMARY KEY (user_id, course_id)
 );
 
+-- Karta orqali to‘lov: foydalanuvchi yuborgan chek skrinshoti, admin tasdiqlaydi yoki rad etadi.
+CREATE TABLE IF NOT EXISTS receipts (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    order_id    INTEGER NOT NULL REFERENCES orders(id),
+    user_id     INTEGER NOT NULL REFERENCES users(id),
+    file_id     TEXT NOT NULL,
+    file_type   TEXT NOT NULL CHECK (file_type IN ('photo', 'document')),
+    status      TEXT NOT NULL CHECK (status IN ('pending', 'approved', 'rejected')),
+    admin_id    INTEGER,
+    created_at  TEXT NOT NULL,
+    decided_at  TEXT
+);
+-- Bir buyurtma uchun bir vaqtda faqat bitta ko‘rib chiqilayotgan chek.
+CREATE UNIQUE INDEX IF NOT EXISTS ux_receipts_pending ON receipts(order_id) WHERE status = 'pending';
+
+-- Admin bot ichidan o‘zgartiradigan bezak sozlamalari (stiker file_id, custom emoji ID). .env’dan ustun turadi.
+CREATE TABLE IF NOT EXISTS app_settings (
+    key         TEXT PRIMARY KEY,
+    value       TEXT NOT NULL,
+    updated_at  TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS admin_logs (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
     admin_id    INTEGER NOT NULL,
@@ -215,6 +237,18 @@ class Database:
         rows = await self.all('SELECT * FROM admin_logs ORDER BY id DESC LIMIT ? OFFSET ?',
                               (per_page, page * per_page))
         return rows, await self.value('SELECT COUNT(*) FROM admin_logs')
+
+    # ------------------------------------------------------------ bezak sozlamalari
+    async def app_settings(self) -> dict[str, str]:
+        return {r['key']: r['value'] for r in await self.all('SELECT key, value FROM app_settings')}
+
+    async def set_app_setting(self, admin_id: int, key: str, value: str) -> None:
+        """Bo‘sh qiymat — sozlamani o‘chirish (.env’dagi qiymat ham bekor bo‘ladi)."""
+        async with self.tx() as conn:
+            await conn.execute('INSERT INTO app_settings(key, value, updated_at) VALUES (?,?,?) '
+                               'ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at',
+                               (key, value, ts()))
+            await self._log(conn, admin_id, 'appearance_set' if value else 'appearance_clear', {'key': key})
 
     # -------------------------------------------------------------- foydalanuvchi
     async def touch_user(self, user_id: int, username: str | None, first_name: str | None) -> dict:
@@ -427,32 +461,82 @@ class Database:
     async def mark_paid(self, order_id: int, payment_id: str, environment: str, bill_id: str | None = None) -> PaidResult:
         """To‘lovni tasdiqlash va xarid yaratish — bitta atomar tranzaksiya. Takroriy chaqiruv xavfsiz."""
         async with self.tx() as conn:
-            async with conn.execute('SELECT * FROM orders WHERE id = ?', (order_id,)) as cur:
-                order = await cur.fetchone()
-            if not order:
-                raise LookupError(f'order {order_id} not found')
-            if order['tezcheck_payment_id'] and order['tezcheck_payment_id'] != payment_id:
-                raise ValueError('payment id mismatch')
-            async with conn.execute('SELECT id, order_id FROM purchases WHERE user_id = ? AND course_id = ?',
-                                    (order['user_id'], order['course_id'])) as cur:
-                purchase = await cur.fetchone()
-            if order['status'] == 'paid':
-                if purchase and purchase['order_id'] == order_id:
-                    return PaidResult(False, purchase['id'])
-                return PaidResult(False, None, duplicate=True)
-            now = ts()
-            await conn.execute(
-                "UPDATE orders SET status = 'paid', paid_at = ?, tezcheck_payment_id = ?, payment_environment = ?, "
-                'tezcheck_bill_id = COALESCE(tezcheck_bill_id, ?), last_error = NULL, updated_at = ? WHERE id = ?',
-                (now, payment_id, environment, bill_id, now, order_id))
-            if purchase:
-                await conn.execute('UPDATE orders SET last_error = ? WHERE id = ?',
-                                   ('duplicate_payment', order_id))
-                return PaidResult(True, None, duplicate=True)
+            return await self._mark_paid(conn, order_id, payment_id, environment, bill_id)
+
+    @staticmethod
+    async def _mark_paid(conn, order_id: int, payment_id: str, environment: str,
+                         bill_id: str | None = None) -> PaidResult:
+        async with conn.execute('SELECT * FROM orders WHERE id = ?', (order_id,)) as cur:
+            order = await cur.fetchone()
+        if not order:
+            raise LookupError(f'order {order_id} not found')
+        if order['tezcheck_payment_id'] and order['tezcheck_payment_id'] != payment_id:
+            raise ValueError('payment id mismatch')
+        async with conn.execute('SELECT id, order_id FROM purchases WHERE user_id = ? AND course_id = ?',
+                                (order['user_id'], order['course_id'])) as cur:
+            purchase = await cur.fetchone()
+        if order['status'] == 'paid':
+            if purchase and purchase['order_id'] == order_id:
+                return PaidResult(False, purchase['id'])
+            return PaidResult(False, None, duplicate=True)
+        now = ts()
+        await conn.execute(
+            "UPDATE orders SET status = 'paid', paid_at = ?, tezcheck_payment_id = ?, payment_environment = ?, "
+            'tezcheck_bill_id = COALESCE(tezcheck_bill_id, ?), last_error = NULL, updated_at = ? WHERE id = ?',
+            (now, payment_id, environment, bill_id, now, order_id))
+        if purchase:
+            await conn.execute('UPDATE orders SET last_error = ? WHERE id = ?',
+                               ('duplicate_payment', order_id))
+            return PaidResult(True, None, duplicate=True)
+        cur = await conn.execute(
+            'INSERT INTO purchases(user_id, course_id, order_id, status, created_at, updated_at) '
+            "VALUES (?,?,?,'pending_invite',?,?)", (order['user_id'], order['course_id'], order_id, now, now))
+        return PaidResult(True, cur.lastrowid)
+
+    # ------------------------------------------------------------- karta cheklari
+    async def add_receipt(self, order_id: int, user_id: int, file_id: str, file_type: str) -> int | None:
+        """Chekni saqlaydi. None — bu buyurtma uchun boshqa chek allaqachon ko‘rib chiqilmoqda."""
+        async with self.tx() as conn:
+            async with conn.execute("SELECT 1 FROM receipts WHERE order_id = ? AND status = 'pending'",
+                                    (order_id,)) as cur:
+                if await cur.fetchone():
+                    return None
             cur = await conn.execute(
-                'INSERT INTO purchases(user_id, course_id, order_id, status, created_at, updated_at) '
-                "VALUES (?,?,?,'pending_invite',?,?)", (order['user_id'], order['course_id'], order_id, now, now))
-            return PaidResult(True, cur.lastrowid)
+                'INSERT INTO receipts(order_id, user_id, file_id, file_type, status, created_at) '
+                "VALUES (?,?,?,?,'pending',?)", (order_id, user_id, file_id, file_type, ts()))
+            return cur.lastrowid
+
+    async def get_receipt(self, receipt_id: int) -> dict | None:
+        return await self.one('SELECT * FROM receipts WHERE id = ?', (receipt_id,))
+
+    async def decide_receipt(self, receipt_id: int, admin_id: int,
+                             approve: bool) -> tuple[str, dict | None, PaidResult | None]:
+        """Chekni tasdiqlash yoki rad etish; tasdiqda to‘lov ham belgilanadi — bitta atomar tranzaksiya.
+
+        Natija: ('approved'|'rejected'|'already'|'not_found', chek, PaidResult|None).
+        Ikki admin bir vaqtda bossa, faqat birinchisi qabul qilinadi.
+        """
+        status = 'approved' if approve else 'rejected'
+        async with self.tx() as conn:
+            cur = await conn.execute("UPDATE receipts SET status = ?, admin_id = ?, decided_at = ? "
+                                     "WHERE id = ? AND status = 'pending'", (status, admin_id, ts(), receipt_id))
+            async with conn.execute('SELECT * FROM receipts WHERE id = ?', (receipt_id,)) as c:
+                row = await c.fetchone()
+            if not row:
+                return 'not_found', None, None
+            receipt = dict(row)
+            if not cur.rowcount:
+                return 'already', receipt, None
+            await self._log(conn, admin_id, 'receipt_approve' if approve else 'receipt_reject',
+                            {'receipt_id': receipt_id, 'order_id': receipt['order_id'], 'user_id': receipt['user_id']})
+            if not approve:
+                return status, receipt, None
+            async with conn.execute('SELECT status FROM orders WHERE id = ?', (receipt['order_id'],)) as c:
+                order_status = (await c.fetchone())[0]
+            if order_status == 'paid':
+                # Buyurtma boshqa yo‘l bilan (Tezcheck) allaqachon to‘langan — kirish allaqachon berilgan.
+                return status, receipt, PaidResult(False, None)
+            return status, receipt, await self._mark_paid(conn, receipt['order_id'], f'card-{receipt_id}', 'card')
 
     async def orders_to_check(self, limit: int = 30, max_age_days: int = 35) -> list[dict]:
         return await self.all(

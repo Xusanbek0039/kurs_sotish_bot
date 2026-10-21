@@ -22,7 +22,7 @@ from config import ConfigError, Settings, load_settings
 from database import Database
 from services.payments import PaymentService
 from services.tezcheck import TezcheckClient, TezcheckError
-from services.ui import EmojiFallbackMiddleware
+from services.ui import EmojiFallbackMiddleware, apply_appearance
 
 log = logging.getLogger('bot')
 
@@ -117,6 +117,7 @@ async def run(settings: Settings) -> None:
     db = Database(settings.database_path)
     await db.connect()
     log.info('Ma’lumotlar bazasi: %s', settings.database_path)
+    apply_appearance(settings, await db.app_settings())   # admin bot ichidan qo‘ygan stiker/emoji’lar
     reset = await db.reset_stuck_deliveries()
     if reset:
         log.info('Yakunlanmagan %s ta havola yuborish qayta navbatga qo‘yildi', reset)

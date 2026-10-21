@@ -31,6 +31,34 @@ def emoji(settings, key: str, fallback: str) -> str:
     return f'<tg-emoji emoji-id="{emoji_id}">{fallback}</tg-emoji>' if emoji_id else fallback
 
 
+# Admin bot ichidan o‘zgartira oladigan bezak kalitlari: kalit → (settings’dagi lug‘at, undagi nom).
+APPEARANCE = {
+    'sticker_welcome': ('stickers', 'welcome'),
+    'sticker_success': ('stickers', 'success'),
+    'emoji_course': ('custom_emoji', 'course'),
+    'emoji_payment': ('custom_emoji', 'payment'),
+    'emoji_success': ('custom_emoji', 'success'),
+}
+
+
+def apply_appearance(settings, overrides: dict[str, str]) -> None:
+    """Bazadagi qiymatlarni ishlayotgan sozlamalarga qo‘llaydi (bo‘sh qiymat — o‘chirish)."""
+    for key, value in overrides.items():
+        if key not in APPEARANCE:
+            continue
+        attr, name = APPEARANCE[key]
+        target = getattr(settings, attr)
+        if value:
+            target[name] = value
+        else:
+            target.pop(name, None)
+
+
+def appearance_value(settings, key: str) -> str:
+    attr, name = APPEARANCE[key]
+    return getattr(settings, attr).get(name, '')
+
+
 def course_name(course: dict, lang: str) -> str:
     other = 'ru' if lang == 'uz' else 'uz'
     return course.get(f'name_{lang}') or course.get(f'name_{other}') or f'#{course.get("id", "?")}'

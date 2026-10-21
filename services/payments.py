@@ -19,9 +19,10 @@ from aiogram.exceptions import TelegramAPIError, TelegramForbiddenError
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
 from database import Database, PaidResult, parse_ts, utcnow
+from keyboards.callbacks import AdminCb
 from locales import t
 from services.tezcheck import TezcheckClient, TezcheckError, Verdict, evaluate_bill
-from services.ui import TASHKENT, course_name, emoji, h
+from services.ui import TASHKENT, course_name, emoji, h, money, user_label
 
 log = logging.getLogger(__name__)
 
@@ -67,11 +68,22 @@ class PaymentService:
 
     # ------------------------------------------------------------------ checkout
     async def checkout(self, user_id: int, course_id: int) -> Checkout:
-        kind, row = await self.db.get_or_create_open_order(user_id, course_id)
-        if kind == 'purchased':
-            return Checkout('purchased', purchase=row)
-        if kind == 'unavailable':
-            return Checkout('unavailable')
+        for attempt in range(2):
+            kind, row = await self.db.get_or_create_open_order(user_id, course_id)
+            if kind == 'purchased':
+                return Checkout('purchased', purchase=row)
+            if kind == 'unavailable':
+                return Checkout('unavailable')
+            if attempt or row['status'] != 'pending' or not row['tezcheck_bill_id']:
+                break
+            # Eski hisob Tezcheck’da yopilgan bo‘lishi mumkin (muddati o‘tgan, ishlatilgan, bekor qilingan) —
+            # foydalanuvchiga “Havola mavjud emas” sahifasini bermaslik uchun avval holatini tekshiramiz.
+            result = await self.check_order(row['id'])
+            if result == 'paid':
+                return Checkout('purchased', purchase=await self.db.purchase_for(user_id, course_id))
+            if result != 'expired':
+                break
+            # Buyurtma “expired” bo‘ldi — keyingi aylanishda yangi buyurtma va yangi hisob yaratiladi.
         async with self._lock(row['id']):
             order = await self.db.get_order(row['id'])
             if order['status'] == 'pending' and order['payment_url']:
@@ -136,6 +148,48 @@ class PaymentService:
             await self.alert_admins('alert_duplicate_payment', order_id=order['id'], user_id=order['user_id'])
         if result.purchase_id:
             await self.deliver(result.purchase_id)
+
+    # ------------------------------------------------------- karta + chek orqali to‘lov
+    async def submit_receipt(self, order_id: int, user_id: int, file_id: str, file_type: str) -> str:
+        """Chekni saqlab, adminlarga tasdiqlash tugmalari bilan yuboradi.
+
+        Natija: sent | busy (oldingi chek hali ko‘rilmoqda) | paid | not_found.
+        """
+        order = await self.db.get_order(order_id)
+        if not order or order['user_id'] != user_id:
+            return 'not_found'
+        if order['status'] == 'paid':
+            return 'paid'
+        receipt_id = await self.db.add_receipt(order_id, user_id, file_id, file_type)
+        if receipt_id is None:
+            return 'busy'
+        user = await self.db.get_user(user_id) or {}
+        for admin_id in self.settings.admin_ids:
+            lang = await self._lang(admin_id)
+            caption = t(lang, 'receipt_admin', receipt_id=receipt_id, order_id=order_id, user=user_label(user),
+                        user_id=user_id, course=h(order['course_title']), amount=money(order['amount_uzs'], lang))
+            markup = InlineKeyboardMarkup(inline_keyboard=[[
+                InlineKeyboardButton(text=t(lang, 'btn_receipt_approve'), style='success',
+                                     callback_data=AdminCb(action='rcok', id=receipt_id).pack()),
+                InlineKeyboardButton(text=t(lang, 'btn_receipt_reject'), style='danger',
+                                     callback_data=AdminCb(action='rcno', id=receipt_id).pack())]])
+            try:
+                if file_type == 'photo':
+                    await self.bot.send_photo(admin_id, file_id, caption=caption, reply_markup=markup)
+                else:
+                    await self.bot.send_document(admin_id, file_id, caption=caption, reply_markup=markup)
+            except TelegramAPIError as exc:
+                log.warning('Chek adminga yuborilmadi: admin=%s xato=%s', admin_id, type(exc).__name__)
+        return 'sent'
+
+    async def decide_receipt(self, receipt_id: int, admin_id: int, approve: bool) -> tuple[str, dict | None]:
+        """Admin qarori. Tasdiqda xarid yaratiladi va kanal havolasi yuboriladi; rad etilsa xaridor xabardor qilinadi."""
+        status, receipt, result = await self.db.decide_receipt(receipt_id, admin_id, approve)
+        if status == 'approved' and result is not None:
+            await self._after_paid({'id': receipt['order_id'], 'user_id': receipt['user_id']}, result)
+        elif status == 'rejected':
+            await self._notify_user(receipt['user_id'], 'receipt_rejected', order_id=receipt['order_id'])
+        return status, receipt
 
     # ------------------------------------------------------------- havola yuborish
     async def deliver(self, purchase_id: int, actor: str = 'system', new_link: bool = False) -> str:
@@ -209,9 +263,9 @@ class PaymentService:
                             purchase_id, type(exc).__name__)
                 return 'send_failed'
             await self.db.mark_purchase_sent(purchase_id)
-            if self.settings.sticker_success:
+            if self.settings.stickers.get('success'):
                 with contextlib.suppress(TelegramAPIError):
-                    await self.bot.send_sticker(user_id, self.settings.sticker_success)
+                    await self.bot.send_sticker(user_id, self.settings.stickers['success'])
             return 'sent'
         except BaseException:
             with contextlib.suppress(Exception):

@@ -79,7 +79,10 @@ def evaluate_bill(order: dict, bill: BillStatus) -> Verdict:
             or bill.external_reference != order['external_reference']):
         return Verdict.MISMATCH
     if not bill.paid:
-        return Verdict.EXPIRED if bill.state in DEAD_BILL_STATES else Verdict.PENDING
+        # To‘lov sahifasi “Havola mavjud emas” deb ko‘rsatadigan har qanday to‘lanmagan hisob — o‘lik.
+        # Diqqat: muddati o‘tgan hisobda ham state='active' qoladi, faqat unavailability_reason='expired' bo‘ladi.
+        dead = bill.state in DEAD_BILL_STATES or bool(bill.unavailability_reason)
+        return Verdict.EXPIRED if dead else Verdict.PENDING
     if not bill.livemode or bill.environment != 'live':
         return Verdict.TEST
     if (bill.payment_state != 'succeeded' or not bill.payment_id or bill.payment_livemode is not True

@@ -31,7 +31,8 @@ class HandlerTests(unittest.IsolatedAsyncioTestCase):
 
     async def _cleanup(self):
         # Modul darajasidagi routerlarni keyingi test uchun Dispatcher’dan ajratamiz.
-        for router in (handlers.admin.router, handlers.admin_users.router, handlers.user.router, handlers.fallback):
+        for router in (handlers.admin.router, handlers.admin_users.router, handlers.admin_appearance.router,
+                       handlers.user.router, handlers.fallback):
             router._parent_router = None
         await self.payments.shutdown()
         await self.db.close()

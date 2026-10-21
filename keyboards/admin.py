@@ -28,6 +28,7 @@ def menu_kb(lang: str) -> InlineKeyboardMarkup:
     b.row(_b(t(lang, 'btn_admin_courses'), 'courses'), _b(t(lang, 'btn_admin_orders'), 'orders'))
     b.row(_b(t(lang, 'btn_admin_users'), 'users'), _b(t(lang, 'btn_admin_search'), 'search'))
     b.row(_b(t(lang, 'btn_admin_stats'), 'stats'), _b(t(lang, 'btn_admin_undelivered'), 'undeliv'))
+    b.row(_b(t(lang, 'btn_admin_appearance'), 'appear'))
     b.row(_b(t(lang, 'btn_admin_logs'), 'logs'),
           InlineKeyboardButton(text=LANGUAGE_BUTTON, callback_data=UserCb(action='lang').pack()))
     return b.as_markup()

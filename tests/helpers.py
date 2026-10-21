@@ -8,8 +8,8 @@ from types import SimpleNamespace
 
 from aiogram.client.session.base import BaseSession
 from aiogram.exceptions import TelegramBadRequest, TelegramForbiddenError
-from aiogram.methods import (AnswerCallbackQuery, EditMessageText, GetChat, GetChatMember, GetMe, SendDocument,
-                             SendMessage)
+from aiogram.methods import (AnswerCallbackQuery, CreateChatInviteLink, EditMessageText, GetChat, GetChatMember,
+                             GetMe, SendDocument, SendMessage, SendPhoto)
 from aiogram.types import Chat, Message, User
 
 from config import Settings
@@ -118,6 +118,12 @@ class FakeBot:
     async def send_sticker(self, chat_id, sticker):
         pass
 
+    async def send_photo(self, chat_id, photo, caption=None, reply_markup=None, **_):
+        self.messages.append((chat_id, caption, reply_markup))
+
+    async def send_document(self, chat_id, document, caption=None, reply_markup=None, **_):
+        self.messages.append((chat_id, caption, reply_markup))
+
     async def get_chat_member(self, chat_id, user_id):
         return SimpleNamespace(status='member' if user_id in self.members else 'left')
 
@@ -146,10 +152,12 @@ class RecordingSession(BaseSession):
         self.requests.append(method)
         if isinstance(method, GetMe):
             return User(id=999, is_bot=True, first_name='Bot', username='kurs_test_bot')
-        if isinstance(method, (SendMessage, EditMessageText, SendDocument)):
+        if isinstance(method, (SendMessage, EditMessageText, SendDocument, SendPhoto)):
             return Message(message_id=len(self.requests), date=datetime.now(timezone.utc),
                            chat=Chat(id=int(method.chat_id or 0), type='private'),
                            text=getattr(method, 'text', None) or '')
+        if isinstance(method, CreateChatInviteLink):
+            return SimpleNamespace(invite_link=f'https://t.me/+invite{len(self.requests)}')
         if isinstance(method, GetChat):
             return SimpleNamespace(id=method.chat_id, type='channel')
         if isinstance(method, GetChatMember):

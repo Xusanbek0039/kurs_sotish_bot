@@ -29,8 +29,14 @@ class VerdictTests(unittest.TestCase):
         self.assertIs(evaluate_bill(ORDER, status(state='expired')), Verdict.PAID)
 
     def test_unpaid(self):
-        self.assertIs(evaluate_bill(ORDER, status(paid=False, state='active', payment_id=None)), Verdict.PENDING)
+        self.assertIs(evaluate_bill(ORDER, status(paid=False, state='active', payment_id=None,
+                                                  unavailability_reason=None)), Verdict.PENDING)
         self.assertIs(evaluate_bill(ORDER, status(paid=False, state='revoked')), Verdict.EXPIRED)
+
+    def test_active_but_time_expired_is_dead(self):
+        # Haqiqiy Tezcheck javobi: 15 daqiqadan so‘ng state 'active' qoladi, lekin sahifa “Havola mavjud emas”.
+        self.assertIs(evaluate_bill(ORDER, status(paid=False, state='active', payment_id=None,
+                                                  unavailability_reason='expired')), Verdict.EXPIRED)
 
     def test_test_provider(self):
         self.assertIs(evaluate_bill(ORDER, status(livemode=False, environment='test')), Verdict.TEST)

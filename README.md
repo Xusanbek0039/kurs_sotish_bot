@@ -70,6 +70,8 @@ To‘xtatish: `Ctrl+C` — fon vazifasi, Tezcheck va Telegram ulanishlari, baza 
 | `TEZCHECK_API_KEY` | Tezcheck kabinetidagi API kalit |
 | `TEZCHECK_CASH_DESK_CODE` | Kassa **kodi** (`cdk_...`), kassa ID emas |
 | `TEZCHECK_BASE_URL` | `https://api.tezcheck.uz/api/merchant/v1` |
+| `CARD_NUMBER` | Ixtiyoriy. 16 xonali karta raqami — to‘ldirilsa, “💳 Karta orqali to‘lash (chek)” tugmasi chiqadi: xaridor chek skrinshotini yuboradi, adminlarga ✅/❌ tugmalari bilan boradi, tasdiqlansa kanal havolasi avtomatik yuboriladi |
+| `CARD_HOLDER` | Ixtiyoriy. Karta egasining ismi (xaridorga ko‘rsatiladi) |
 | `DATABASE_PATH` | SQLite fayli, standart `data/bot.sqlite3` |
 | `DEFAULT_LANGUAGE` | `uz` yoki `ru` |
 | `SUPPORT_USERNAME` | Yordam uchun Telegram username (ixtiyoriy) |

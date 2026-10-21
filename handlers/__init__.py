@@ -7,7 +7,7 @@ import logging
 from aiogram import Dispatcher, F, Router
 from aiogram.types import CallbackQuery, ErrorEvent, Message
 
-from handlers import admin, admin_users, user
+from handlers import admin, admin_appearance, admin_users, user
 from handlers.utils import UserContextMiddleware
 from keyboards.callbacks import AdminCb
 from locales import t
@@ -54,5 +54,5 @@ def setup(dp: Dispatcher) -> None:
     middleware = UserContextMiddleware()
     dp.message.outer_middleware(middleware)
     dp.callback_query.outer_middleware(middleware)
-    dp.include_routers(admin.router, admin_users.router, user.router, fallback)
+    dp.include_routers(admin.router, admin_users.router, admin_appearance.router, user.router, fallback)
     dp.errors.register(on_error)

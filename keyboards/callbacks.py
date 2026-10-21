@@ -7,7 +7,7 @@ class LangCb(CallbackData, prefix='lang'):
 
 
 class UserCb(CallbackData, prefix='u'):
-    action: str            # menu | catalog | course | buy | check | mine | link | help
+    action: str            # menu | catalog | course | buy | card | check | mine | link | help
     id: int = 0
     page: int = 0
 

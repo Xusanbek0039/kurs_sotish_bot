@@ -78,6 +78,20 @@ TEXTS: dict[str, dict[str, str]] = {
         'status_check_test': '⚠️ Bu test to‘lovi — haqiqiy pul emas. Kursga kirish berilmaydi.',
         'status_check_review': '🕵️ To‘lov ma’lumotlari tekshiruvga yuborildi. Administrator siz bilan bog‘lanadi.\n\n{support}',
         'status_check_error': '⚠️ To‘lov tizimi bilan aloqa vaqtincha yo‘q. Birozdan so‘ng qayta tekshiring. Qayta pul to‘lamang.',
+
+        # --- karta + chek
+        'btn_pay_card': '💳 Karta orqali to‘lash (chek)',
+        'card_payment': '💳 <b>Karta orqali to‘lov</b>\n\n📚 {course}\n🧾 Buyurtma: <b>#{order_id}</b>\n'
+                        '💰 Summa: <b>{amount}</b>\n\n'
+                        '1️⃣ Quyidagi kartaga aynan shu summani o‘tkazing:\n<code>{card}</code>{holder}\n\n'
+                        '2️⃣ To‘lov chekining skrinshotini <b>shu chatga</b> yuboring.\n'
+                        '3️⃣ Administrator tekshirib tasdiqlagach, yopiq kanal havolasi avtomatik keladi.',
+        'receipt_received': '✅ Chek qabul qilindi! Administrator tekshirib tasdiqlagach, kanal havolasi shu yerga keladi.',
+        'receipt_busy': '⏳ Bu buyurtma bo‘yicha chekingiz allaqachon tekshirilmoqda. Iltimos, kuting.',
+        'receipt_wrong_type': '🖼 Iltimos, to‘lov chekining skrinshotini rasm ko‘rinishida yuboring.',
+        'receipt_rejected': '❌ Buyurtma #{order_id} bo‘yicha chek tasdiqlanmadi.\n\n'
+                            'To‘lov to‘g‘ri amalga oshirilgan bo‘lsa, kurs sahifasida «💳 Karta orqali to‘lash» ni bosib, '
+                            'chekni qayta yuboring yoki administratorga yozing.\n\n{support}',
         'status_check_no_bill': '⚠️ Bu buyurtma uchun to‘lov hisobi hali yaratilmagan. Kurs sahifasidan «💳 To‘lov qilish»ni bosing.',
         'check_too_often': '⏳ Biroz kuting va qayta tekshiring.',
         'payment_expired_notice': '⌛ #{order_id} buyurtma bo‘yicha to‘lov havolasining muddati tugadi. '
@@ -273,6 +287,49 @@ TEXTS: dict[str, dict[str, str]] = {
                                'so‘ng «📨 Yuborilmagan havolalar» bo‘limidan qayta yuboring.',
         'alert_refund': '⚠️ Buyurtma #{order_id} (user {user_id}): {event}. Kanal a’zoligini qo‘lda ko‘rib chiqing.',
 
+        # karta cheklari (admin)
+        'receipt_admin': '🧾 <b>Yangi chek #{receipt_id}</b> (karta orqali to‘lov)\n\n'
+                         '👤 {user} · <code>{user_id}</code>\n📚 {course}\n🧾 Buyurtma: #{order_id}\n'
+                         '💰 Summa: <b>{amount}</b>\n\nKartangizga pul tushganini tekshirib, qaror qiling.',
+        'btn_receipt_approve': '✅ Tasdiqlash',
+        'btn_receipt_reject': '❌ Rad etish',
+        'receipt_status_pending': '⏳ Kutilmoqda',
+        'receipt_status_approved': '✅ Tasdiqlandi',
+        'receipt_status_rejected': '❌ Rad etildi',
+        'receipt_decided': '<b>{status}</b> · admin <code>{admin_id}</code>',
+        'receipt_already': 'Bu chek allaqachon ko‘rib chiqilgan: {status}',
+
+        # bezak (stiker / custom emoji)
+        'btn_admin_appearance': '🎨 Bezak: stiker va emoji',
+        'appear_title': '🎨 <b>Bezak</b>
+
+'
+                        'Botga <b>stiker</b> yoki <b>custom emoji</b> (Premium) yuboring — ID’ni o‘zim aniqlayman va '
+                        'qayerga qo‘yishni so‘rayman. Hech narsa nusxalash shart emas.
+
+{items}',
+        'appear_name_sticker_welcome': '👋 Salomlashish stikeri',
+        'appear_name_sticker_success': '🎉 Xariddan keyingi stiker',
+        'appear_name_emoji_course': '📚 Kurs emojisi',
+        'appear_name_emoji_payment': '💳 To‘lov emojisi',
+        'appear_name_emoji_success': '✅ Muvaffaqiyat emojisi',
+        'appear_sticker': '🖼 <b>Stiker qabul qilindi</b>
+
+file_id: <code>{file_id}</code>
+
+Qayerga qo‘yamiz? 👇',
+        'appear_emoji': '✨ <b>Custom emoji qabul qilindi</b>
+
+ID: <code>{emoji_id}</code>{others}
+
+'
+                        'Birinchisini qayerga qo‘yamiz? 👇',
+        'appear_saved': '✅ Saqlandi: {name}',
+        'appear_saved_preview': '✅ <b>{name}</b> yangilandi va darhol ishlay boshladi. {preview}',
+        'appear_cleared': '🗑 O‘chirildi: {name}',
+        'appear_expired': 'Stiker yoki emojini qaytadan yuboring.',
+        'btn_appear_clear': '🗑 {name} — o‘chirish',
+
         # tekshiruv natijalari (admin)
         'result_paid': '✅ to‘langan',
         'result_pending': '⏳ hali to‘lanmagan',
@@ -354,6 +411,19 @@ TEXTS: dict[str, dict[str, str]] = {
         'status_check_test': '⚠️ Это тестовый платёж — не реальные деньги. Доступ к курсу не выдаётся.',
         'status_check_review': '🕵️ Данные оплаты отправлены на проверку. Администратор свяжется с вами.\n\n{support}',
         'status_check_error': '⚠️ Нет связи с платёжной системой. Проверьте чуть позже. Не платите повторно.',
+
+        'btn_pay_card': '💳 Оплатить на карту (чек)',
+        'card_payment': '💳 <b>Оплата на карту</b>\n\n📚 {course}\n🧾 Заказ: <b>#{order_id}</b>\n'
+                        '💰 Сумма: <b>{amount}</b>\n\n'
+                        '1️⃣ Переведите ровно эту сумму на карту:\n<code>{card}</code>{holder}\n\n'
+                        '2️⃣ Отправьте скриншот чека об оплате <b>в этот чат</b>.\n'
+                        '3️⃣ После проверки администратором ссылка в закрытый канал придёт автоматически.',
+        'receipt_received': '✅ Чек получен! После подтверждения администратором ссылка на канал придёт сюда.',
+        'receipt_busy': '⏳ Ваш чек по этому заказу уже на проверке. Пожалуйста, подождите.',
+        'receipt_wrong_type': '🖼 Пожалуйста, отправьте скриншот чека об оплате в виде изображения.',
+        'receipt_rejected': '❌ Чек по заказу #{order_id} не подтверждён.\n\n'
+                            'Если оплата прошла верно, нажмите «💳 Оплатить на карту» на странице курса и '
+                            'отправьте чек заново или напишите администратору.\n\n{support}',
         'status_check_no_bill': '⚠️ Счёт для этого заказа ещё не создан. Нажмите «💳 Оплатить» на странице курса.',
         'check_too_often': '⏳ Подождите немного и проверьте снова.',
         'payment_expired_notice': '⌛ Срок действия ссылки на оплату заказа #{order_id} истёк. '
@@ -538,6 +608,47 @@ TEXTS: dict[str, dict[str, str]] = {
                                'Проверьте, что бот — администратор с правом приглашения и chat_id верный, '
                                'затем отправьте заново из раздела «📨 Неотправленные ссылки».',
         'alert_refund': '⚠️ Заказ #{order_id} (user {user_id}): {event}. Проверьте участие в канале вручную.',
+
+        'receipt_admin': '🧾 <b>Новый чек #{receipt_id}</b> (оплата на карту)\n\n'
+                         '👤 {user} · <code>{user_id}</code>\n📚 {course}\n🧾 Заказ: #{order_id}\n'
+                         '💰 Сумма: <b>{amount}</b>\n\nПроверьте поступление на карту и примите решение.',
+        'btn_receipt_approve': '✅ Подтвердить',
+        'btn_receipt_reject': '❌ Отклонить',
+        'receipt_status_pending': '⏳ Ожидает',
+        'receipt_status_approved': '✅ Подтверждён',
+        'receipt_status_rejected': '❌ Отклонён',
+        'receipt_decided': '<b>{status}</b> · admin <code>{admin_id}</code>',
+        'receipt_already': 'Этот чек уже рассмотрен: {status}',
+
+        'btn_admin_appearance': '🎨 Оформление: стикеры и эмодзи',
+        'appear_title': '🎨 <b>Оформление</b>
+
+'
+                        'Отправьте боту <b>стикер</b> или <b>custom emoji</b> (Premium) — я сам определю ID и '
+                        'спрошу, куда его поставить. Ничего копировать не нужно.
+
+{items}',
+        'appear_name_sticker_welcome': '👋 Стикер приветствия',
+        'appear_name_sticker_success': '🎉 Стикер после покупки',
+        'appear_name_emoji_course': '📚 Эмодзи курса',
+        'appear_name_emoji_payment': '💳 Эмодзи оплаты',
+        'appear_name_emoji_success': '✅ Эмодзи успеха',
+        'appear_sticker': '🖼 <b>Стикер получен</b>
+
+file_id: <code>{file_id}</code>
+
+Куда поставить? 👇',
+        'appear_emoji': '✨ <b>Custom emoji получен</b>
+
+ID: <code>{emoji_id}</code>{others}
+
+'
+                        'Куда поставить первый? 👇',
+        'appear_saved': '✅ Сохранено: {name}',
+        'appear_saved_preview': '✅ <b>{name}</b> обновлён и уже работает. {preview}',
+        'appear_cleared': '🗑 Удалено: {name}',
+        'appear_expired': 'Отправьте стикер или эмодзи заново.',
+        'btn_appear_clear': '🗑 {name} — удалить',
 
         'result_paid': '✅ оплачен',
         'result_pending': '⏳ ещё не оплачен',
