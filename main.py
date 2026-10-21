@@ -248,6 +248,7 @@ class Shop:
                             await self.db.update('orders', {'id': o['id']}, {'status': 'review'})
                             await self.alert(o, 'Eski noaniq buyurtma: Tezcheck kabinetida external_reference bo‘yicha solishtiring.')
                             raise PaymentError('Eski hisob holati noaniq. Adminga murojaat qiling.')
+                        await call.message.answer('⏳ To‘lov hisobi tayyorlanmoqda. Bir oz kuting.')
                         data = await self.api.create(o)
                         await self.db.update('orders', {'id': o['id']}, {
                             'bill_id': data['bill']['id'], 'payment_url': data['payment_url'], 'status': 'pending'})
@@ -270,7 +271,8 @@ class Shop:
                     else:
                         await call.message.answer('To‘lov hali tasdiqlanmadi. Birozdan keyin qayta tekshiring.')
         except (PaymentError, ValueError) as exc:
-            await call.message.answer(escape(str(exc)))
+            await call.message.answer(escape(str(exc)), reply_markup=keyboard(
+                self.support_items() + [('🎓 Mening xaridlarim', 'u:mine:0'), ('❓ Yordam', 'u:help:0')]))
         except PyMongoError:
             log.warning('MongoDB buyurtmani saqlash/tekshirish xatosi')
             await call.message.answer('Baza bilan aloqa vaqtincha uzildi. Keyinroq qayta tekshiring; qayta to‘lov qilmang.')

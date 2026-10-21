@@ -1,0 +1,4 @@
+aiogram==3.29.0
+pymongo==4.13.2
+dnspython==2.7.0
+python-dotenv==1.1.1

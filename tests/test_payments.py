@@ -111,6 +111,18 @@ class MongoDBTests(unittest.IsolatedAsyncioTestCase):
             {'order_id': o['id'], 'status': 'waiting'}, {'status': 'creating'}) for _ in range(10)))
         self.assertEqual(sum(result.modified_count for result in results), 1)
 
+    async def test_funnel_deduplicates_views_and_matches_paid_order(self):
+        await self.db.track('course_view', 42, self.cid)
+        await self.db.track('course_view', 42, self.cid)
+        await self.db.track('checkout', 42, self.cid)
+        order = await self.db.order(42, self.cid)
+        await self.db.mark_paid(order, 'pay_funnel')
+        stages, conversion = await self.db.funnel_report()
+        self.assertEqual(stages['course_view']['unique'], 1)
+        self.assertEqual(stages['course_view']['hits'], 2)
+        self.assertEqual(conversion['views'], 1)
+        self.assertEqual(conversion['buyers'], 1)
+
 
 if __name__ == '__main__':
     unittest.main()

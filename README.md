@@ -100,6 +100,19 @@ Yopiq kanal yarating va botni **Invite users** huquqi bilan admin qiling. Kanald
 
 Admin avval botni `/start` bilan ochsin. `/admin` menyusida kurs qo‘shish, barcha maydonlarni tahrirlash, faol/nofaol qilish, tasdiqlab o‘chirish, sahifalangan buyurtmalar va statistika bor. Tahrirlashda nom, tavsif, narx, kanal ketma-ket qayta kiritiladi. `/cancel` suhbatni bekor qiladi. Kurs kartasida alohida `https://t.me/BOT_USERNAME?start=course_ID` havolasi chiqadi. Oddiy xaridor admin menyusini ko‘rmaydi; admin handlerlari ham IDni tekshiradi.
 
+## Sotuvga mos xaridor oqimi
+
+- Bosh sahifa brend va tanishtiruv matni bilan ochiladi. Kurslar narxi bilan sahifalanadi.
+- Kurs sahifasida auditoriya, o‘quv natijalari, davomiylik/format, ustoz va aniq xarid tugmasi ko‘rinadi.
+- Dastur va to‘liq tavsif alohida ochiladi. Demo havolasi kiritilsa bepul tanishuv tugmasi chiqadi.
+- `/purchases` yoki **Mening xaridlarim** oldingi buyurtmalarni ko‘rsatadi. Xarid qilingan kurs uchun yangi hisob yaratilmaydi.
+- `/help` xarid tartibi va to‘lov savollariga javob beradi; kontakt sozlansa maslahatchiga yozish tugmasi ko‘rinadi.
+- Kursni ulashish tugmasi [Telegramning rasmiy share havolasi](https://core.telegram.org/widgets/share) orqali ishlaydi. Foydalanuvchi yuborishni o‘zi tanlaydi.
+
+Admin: **Kurslar → kurs → Sotuv sahifasini sozlash**. Maydonlar alohida tahrirlanadi, `-` bilan tozalanadi va auditga yoziladi. Marketing maydonlari ixtiyoriy: oldingi kurslar o‘zgarishsiz ishlaydi. **Reklama uchun matn** mavjud kurs ma’lumotlari va deep linkdan post tayyorlaydi; avtomatik reklama yuborilmaydi. [Amaliy marketing yo‘riqnomasi](MARKETING_GUIDE.md).
+
+**Sotuv bosqichlari** bo‘limi kursni ko‘rish → xaridni boshlash → tasdiqlangan xaridni ko‘rsatadi. `funnel` kolleksiyasi har bir event/user/kurs uchun bitta yozuv va takroriy ko‘rish hisobini saqlaydi. Admin ko‘rishlari chiqarib tashlanadi. Konversiya kuzatilgan user/kurs juftliklaridan to‘laganlar ulushi; statistika yangi funksiya yoqilgan vaqtdan boshlanadi.
+
 ## Tezcheck bilan shartnoma
 
 Kod yozishdan oldin [rasmiy Merchant API hujjati](https://tezcheck.uz/api-docs) tekshirildi. Aiogram versiyasi [rasmiy 3.29 hujjatlariga](https://docs.aiogram.dev/en/v3.29.0/changelog.html) asoslangan.
@@ -130,6 +143,8 @@ python -m unittest discover -s tests -v
 
 API validatsiya testlari tarmoqsiz ishlaydi. Baza testlari `MONGODB_TEST_URI` berilmasa o‘tkazib yuboriladi. Atlas integratsiya testlari bir vaqtdagi xarid, restart, takroriy to‘lov, tranzaksiya rollback, kurs nusxasi, audit va taklif uchun atomar himoyani tekshiradi. Telegram/Tezcheck tarmog‘iga murojaat qilinmaydi.
 
+Konfiguratsiya testlari yangi/eski Tezcheck nomlari va ustuvorligini tekshiradi. Marketing testlari matn uzunligi, HTML escaping, demo URL, ulashish havolasi, xaridorning o‘z orderiga kirishi va to‘langan kurs uchun ikkinchi hisob ochilmasligini tekshiradi. Bu unit testlar haqiqiy `.env`ni o‘qimaydi.
+
 Integratsiya testlari uchun alohida test klasterida `kurs_bot_test_` prefiksli vaqtinchalik bazalarni yaratish/o‘chirish huquqi kerak. Har bir test noyob vaqtinchalik baza yaratadi va tugagach o‘chiradi. Test URI oddiy `.env`dan avtomatik o‘qilmaydi; muhit o‘zgaruvchisi qilib bering:
 
 ```powershell
@@ -153,5 +168,6 @@ Qo‘lda yakuniy ssenariy:
 7. Ruxsat etilgan haqiqiy provayder bilan to‘lovni yakunlang. **To‘lovni tekshirish** yoki fon vazifasini kuting.
 8. Kanal havolasini oching, kirish so‘rovi aynan xaridor uchun tasdiqlansin. Havolani boshqa ID bilan ochganda rad etilsin.
 9. Botni qayta ishga tushiring va xaridni takrorlang: ikkinchi hisob/havola yaratilmasin. Admin statistikasida bitta to‘lov ko‘rinsin.
+10. Kursning sotuv maydonlari va demo darsini to‘ldiring. Admin preview va boshqa xaridorda kartani ochib tekshiring; xaridorning `/purchases` va `/help` tugmalarini sinang. **Sotuv bosqichlari**da admin ko‘rishlari qo‘shilmaganini tekshiring.
 
-Ushbu tayyorlash muhitida Python runtime topilmadi; avtomatik testlar va real to‘lov yakunigacha ishga tushirish bajarilmagan. Ishga tushirish uchun haqiqiy tokenlar, kassa va kanal huquqlari kerak.
+Ushbu tayyorlash muhitida `.venv` ko‘rsatgan Python bajariluvchi fayli topilmadi; avtomatik testlar va real to‘lov yakunigacha ishga tushirish bajarilmagan. Ishga tushirish uchun ishlaydigan Python, haqiqiy tokenlar, kassa va kanal huquqlari kerak.
