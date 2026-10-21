@@ -1,0 +1,114 @@
+# Telegram orqali kurs sotish
+
+Python 3.11+ va SQLite asosidagi aiogram 3 bot. Boshlash buyrug‘i: `python main.py`.
+
+## Tuzilishi
+
+```text
+kurs_sotish_bot/
+  main.py                  Telegram menyulari, admin suhbatlari va fon vazifasi
+  config.py                .env konfiguratsiyasi
+  database.py              SQLite sxemasi va tranzaksiyalar
+  tezcheck.py               Merchant API mijozi
+  requirements.txt
+  .env.example
+  .gitignore
+  README.md
+  tests/test_payments.py
+  data/bot.db               birinchi ishga tushirishda yaratiladi
+```
+
+## Windows (PowerShell)
+
+Python 3.11 yoki yangiroq versiyani python.org saytidan o‘rnating va PATH belgisini yoqing.
+
+```powershell
+py -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install -r requirements.txt
+Copy-Item .env.example .env
+notepad .env
+python main.py
+```
+
+Agar PowerShell aktivlashtirishni cheklasa, virtual muhitdagi Pythonni to‘g‘ridan-to‘g‘ri chaqiring:
+
+```powershell
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt
+.\.venv\Scripts\python.exe main.py
+```
+
+## Linux
+
+Python 3.11+ va distributivingizdagi Python venv paketini o‘rnating.
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install -r requirements.txt
+cp .env.example .env
+nano .env
+python main.py
+```
+
+## Sozlash
+
+- `BOT_TOKEN`: Telegramdagi rasmiy @BotFather orqali `/newbot` bilan yarating.
+- `ADMIN_IDS`: adminlarning raqamli Telegram IDlari, vergul bilan. Botdagi `/id` o‘z IDingizni ko‘rsatadi. Username yozmang.
+- `TEZCHECK_API_KEY`: Tezcheck savdogar kabinetida API kalit yarating.
+- `TEZCHECK_CASH_DESK_CODE`: kabinetdagi kassa kodi; bu kassa IDsi emas.
+- `TEZCHECK_BASE_URL`: namunadagi rasmiy HTTPS manzil.
+- `DATABASE_PATH`: SQLite faylining joyi; `.env`dan nisbiy yo‘l berilsa loyiha papkasiga nisbatan olinadi.
+- `POLL_INTERVAL`: tekshirishlar orasidagi soniyalar, kamida 30.
+- `INVITE_TTL_HOURS`: kirish havolasi muddati, 1–168 soat.
+- `CUSTOM_EMOJI_ID`: ixtiyoriy haqiqiy Telegram custom emoji IDsi. Bo‘sh bo‘lsa oddiy emoji ishlaydi. Telegram hisob/bot cheklovlariga qarab custom emoji oddiy emoji sifatida ko‘rinishi mumkin.
+
+`.env` va SQLite faylini oshkor qilmang. Loglarda token, API javobi va to‘lov/taklif URLlari chiqarilmaydi.
+
+Yopiq kanal yarating va botni **Invite users** huquqi bilan admin qiling. Kanalda ochiq username bo‘lmasin. Kanal postini botga yuborib chat ID aniqlash mumkin; ishonchli Telegram Bot API `getUpdates` javobida `channel_post.chat.id` qiymati ham ko‘rinadi. Polling ishlayotgan paytda ikkinchi `getUpdates` chaqiruvini ishlatmang. Kanal IDsi odatda `-100` bilan boshlanadi. Uni kurs qo‘shish suhbatida kiriting; bot kanal turi va o‘z huquqlarini tekshiradi.
+
+Admin avval botni `/start` bilan ochsin. `/admin` menyusida kurs qo‘shish, barcha maydonlarni tahrirlash, faol/nofaol qilish, tasdiqlab o‘chirish, sahifalangan buyurtmalar va statistika bor. Tahrirlashda nom, tavsif, narx, kanal ketma-ket qayta kiritiladi. `/cancel` suhbatni bekor qiladi. Kurs kartasida alohida `https://t.me/BOT_USERNAME?start=course_ID` havolasi chiqadi. Oddiy xaridor admin menyusini ko‘rmaydi; admin handlerlari ham IDni tekshiradi.
+
+## Tezcheck bilan shartnoma
+
+Kod yozishdan oldin [rasmiy Merchant API hujjati](https://tezcheck.uz/api-docs) tekshirildi. Aiogram versiyasi [rasmiy 3.29 hujjatlariga](https://docs.aiogram.dev/en/v3.29.0/changelog.html) asoslangan.
+
+API mijozi autentifikatsiya sarlavhalarini yuboradi. Hisob `POST /bills` bilan yaratiladi; `data.bill.id` va `data.payment_url` darhol saqlanadi. Narx butun so‘mda, API summasi esa 100 ga ko‘paytirilib yuboriladi. Har bir order o‘zgarmas UUID reference va idempotency kalitiga ega.
+
+Holat uchun **POST** `/bills/{bill}` ishlatiladi. `bill.paid`, `bill.livemode`, haqiqiy muhit, payment holati, summa, valyuta va buyurtmaga moslik tekshiriladi. Test to‘lovi kanalni ochmaydi. Brauzer qaytishi va tugma bosilishi to‘lov isboti emas. Webhook kerak emas: foydalanuvchi tugmasi va fon tekshiruvi mavjud. `/health` admin buyrug‘i bazani va autentifikatsiyalangan `GET /me` ulanishini tekshiradi; hisob yaratmaydi.
+
+Kassa kalitida faqat imzolangan so‘rovlar talabi yoqilgan bo‘lsa, bu Bearer mijozi rad etiladi. Ushbu loyiha uchun kabinetda Bearer so‘rovlariga ruxsat bering.
+
+## Saqlash va xatolardan tiklash
+
+Bir foydalanuvchi/kurs uchun bitta ochiq buyurtma va bitta xarid mavjud. To‘lovni qayta ishlash tranzaksiyali. Mavjud xarid uchun yangi hisob ochilmaydi; saqlangan havola qayta ko‘rsatilishi mumkin. Kurs o‘chirilishi arxivlash orqali bajariladi, buyurtma va audit tarixi saqlanadi. Buyurtma narxi, nomi va kanal IDsi xarid boshlangan paytdagi nusxasi bilan saqlanadi.
+
+Noaniq hisob yaratish javobi o‘sha order va idempotency kaliti bilan qayta so‘raladi. Idempotency saqlanishi cheklanganligi sabab 23 soatdan eski, bill IDsi olinmagan order `review` holatiga o‘tadi. Admin kabinetda orderning `external_reference` raqami bo‘yicha solishtirishi kerak; avtomatik yangi hisob ochilmaydi.
+
+Kirish havolasi muddati cheklangan **join request** havolasi: bot faqat to‘lagan foydalanuvchining IDsi uchun so‘rovni tasdiqlaydi, keyin havolani bekor qiladi. Telegramda join request va `member_limit=1` birga ishlatilmaydi. Ushbu usul ulashilgan havoladan begona shaxs kirishini cheklaydi. Boshqa adminlar begona so‘rovlarni qo‘lda tasdiqlamasin.
+
+Telegramga taklif yaratish paytida jarayon uzilsa, yangi havola avtomatik yaratilmaydi: admin yordam beradi. Kanal huquqi xatosi haqida adminlarga xabar yuboriladi. Havola muddati o‘tgan yoki `error` holatidagi haqiqiy xaridorga admin kabinetdagi tekshiruvdan so‘ng qo‘lda yordam beradi. To‘langan foydalanuvchini qayta to‘lashga majburlamang. Bot bloklangan bo‘lsa xabar yetkazish keyingi fon aylanishida qayta uriniladi.
+
+Faqat bitta bot jarayonini ishga tushiring. Buyurtmalar, xaridlar va audit doimiy; tugallanmagan admin suhbatlari xotirada, restartdan keyin qayta boshlanadi. SQLite joylashgan disk doimiy bo‘lsin. Ishlayotgan WAL bazasini nusxalashda SQLite backup usulidan foydalaning yoki botni to‘xtatib nusxalang. Bu bot refund/chargebackdan keyin kanal a’zosini avtomatik chiqarishni bajarmaydi; keyingi qaytarishlarni admin nazorat qiladi.
+
+## Test
+
+```bash
+python -m unittest discover -s tests -v
+```
+
+Testlar bir vaqtdagi xarid, restartdan keyingi buyurtma, takroriy tasdiqlash, kurs o‘zgarishidan mustaqil order nusxasi, test to‘lovi va noto‘g‘ri summani rad etishni tekshiradi. Haqiqiy Telegram/Tezcheck tarmog‘iga murojaat qilmaydi.
+
+Qo‘lda yakuniy ssenariy:
+
+1. `/health` bilan kassa ulanishini tekshiring.
+2. `/admin` → **Kurs qo‘shish** → nom → tavsif → narx → kanal ID → tasdiqlash.
+3. Kurs kartasidagi deep linkni boshqa foydalanuvchi bilan oching.
+4. **To‘lov qilish** → hisob yaratilishini tekshiring. Qayta bosilganda o‘sha hisob chiqsin.
+5. To‘lamasdan **To‘lovni tekshirish** bosing: kanal havolasi berilmasin.
+6. Avval Test provider bilan to‘lang: test to‘lovi sifatida rad etilsin. Bu haqiqiy kursni ochmaydi; jonli sinov uchun boshqa foydalanuvchi/kursdan foydalaning.
+7. Ruxsat etilgan haqiqiy provayder bilan to‘lovni yakunlang. **To‘lovni tekshirish** yoki fon vazifasini kuting.
+8. Kanal havolasini oching, kirish so‘rovi aynan xaridor uchun tasdiqlansin. Havolani boshqa ID bilan ochganda rad etilsin.
+9. Botni qayta ishga tushiring va xaridni takrorlang: ikkinchi hisob/havola yaratilmasin. Admin statistikasida bitta to‘lov ko‘rinsin.
+
+Ushbu tayyorlash muhitida Python runtime topilmadi; avtomatik testlar va real to‘lov yakunigacha ishga tushirish bajarilmagan. Ishga tushirish uchun haqiqiy tokenlar, kassa va kanal huquqlari kerak.
