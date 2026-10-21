@@ -4,9 +4,8 @@ from __future__ import annotations
 import contextlib
 import logging
 import time
-from html import escape
 
-from aiogram import Bot, F, Router
+from aiogram import F, Router
 from aiogram.exceptions import TelegramAPIError
 from aiogram.filters import Command, CommandObject, CommandStart
 from aiogram.fsm.context import FSMContext

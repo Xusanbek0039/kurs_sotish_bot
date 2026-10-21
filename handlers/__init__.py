@@ -5,7 +5,6 @@ import contextlib
 import logging
 
 from aiogram import Dispatcher, F, Router
-from aiogram.exceptions import TelegramAPIError
 from aiogram.types import CallbackQuery, ErrorEvent, Message
 
 from handlers import admin, admin_users, user

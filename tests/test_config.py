@@ -1,53 +1,71 @@
-import os
 import unittest
-from unittest.mock import patch
 
-from config import Config
+from config import ConfigError, load_settings
+
+BASE = {
+    'BOT_TOKEN': '123456789:' + 'A' * 35,
+    'ADMIN_IDS': '111, 222',
+    'TEZCHECK_API_KEY': 'aps_key',
+    'TEZCHECK_CASH_DESK_CODE': 'cdk_desk',
+}
 
 
 class ConfigTests(unittest.TestCase):
-    def load_config(self, values):
-        base = {'BOT_TOKEN': 'test-token', 'ADMIN_IDS': '1,2',
-                'TEZCHECK_CASH_DESK_CODE': 'desk', 'MONGODB_URI': 'mongodb://localhost:27017'}
-        with patch.dict(os.environ, {**base, **values}, clear=True), patch('config.load_dotenv'):
-            return Config.load()
+    def test_minimal_config_and_defaults(self):
+        s = load_settings(dict(BASE))
+        self.assertEqual(s.admin_ids, frozenset({111, 222}))
+        self.assertEqual(s.tezcheck_base_url, 'https://api.tezcheck.uz/api/merchant/v1')
+        self.assertEqual(s.default_language, 'uz')
+        self.assertEqual(s.webhook_port, 8080)
+        self.assertFalse(s.webhook_enabled)
+        self.assertEqual(s.webhook_url, '')
+        self.assertTrue(str(s.database_path).endswith('bot.sqlite3'))
 
-    def test_new_names(self):
-        cfg = self.load_config({'TEZCHECK_API_TOKEN': 'new-token',
-                               'TEZCHECK_API_BASE_URL': 'https://example.test/api/'})
-        self.assertEqual(cfg.api_key, 'new-token')
-        self.assertEqual(cfg.base_url, 'https://example.test/api')
+    def test_secrets_not_in_repr(self):
+        s = load_settings({**BASE, 'TEZCHECK_WEBHOOK_SECRET': 'wbs_secret_123'})
+        text = repr(s)
+        for secret in (BASE['BOT_TOKEN'], 'aps_key', 'wbs_secret_123', 'cdk_desk'):
+            self.assertNotIn(secret, text)
+        self.assertIn('wbs_secret_123', s.secrets())
+
+    def test_webhook_url_built_from_public_base(self):
+        s = load_settings({**BASE, 'PUBLIC_BASE_URL': 'https://bot.example.uz/', 'TEZCHECK_WEBHOOK_SECRET': 'x'})
+        self.assertEqual(s.webhook_url, 'https://bot.example.uz/webhooks/tezcheck')
+        self.assertTrue(s.webhook_enabled)
+
+    def test_public_url_must_be_https(self):
+        with self.assertRaises(ConfigError):
+            load_settings({**BASE, 'PUBLIC_BASE_URL': 'http://bot.example.uz'})
+
+    def test_required_values(self):
+        for key in BASE:
+            with self.subTest(key=key), self.assertRaises(ConfigError):
+                load_settings({**BASE, key: ''})
+
+    def test_bad_admin_ids(self):
+        for value in ('abc', '-5', '@username'):
+            with self.subTest(value=value), self.assertRaises(ConfigError):
+                load_settings({**BASE, 'ADMIN_IDS': value})
 
     def test_legacy_names_still_work(self):
-        cfg = self.load_config({'TEZCHECK_API_KEY': 'old-token',
-                               'TEZCHECK_BASE_URL': 'https://old.example.test/api'})
-        self.assertEqual(cfg.api_key, 'old-token')
-        self.assertEqual(cfg.base_url, 'https://old.example.test/api')
+        env = {k: v for k, v in BASE.items() if k != 'TEZCHECK_API_KEY'}
+        s = load_settings({**env, 'TEZCHECK_API_TOKEN': 'old_key', 'POLL_INTERVAL': '90', 'INVITE_TTL_HOURS': '12'})
+        self.assertEqual(s.tezcheck_api_key, 'old_key')
+        self.assertEqual(s.payment_check_interval, 90)
+        self.assertEqual(s.invite_link_ttl_hours, 12)
 
-    def test_new_names_take_priority(self):
-        cfg = self.load_config({'TEZCHECK_API_TOKEN': 'new', 'TEZCHECK_API_KEY': 'old',
-            'TEZCHECK_API_BASE_URL': 'https://new.example.test', 'TEZCHECK_BASE_URL': 'https://old.example.test'})
-        self.assertEqual(cfg.api_key, 'new')
-        self.assertEqual(cfg.base_url, 'https://new.example.test')
+    def test_invalid_custom_emoji_falls_back(self):
+        with self.assertLogs('config', level='WARNING'):
+            s = load_settings({**BASE, 'CUSTOM_EMOJI_COURSE': 'not-an-id', 'CUSTOM_EMOJI_PAYMENT': '5368324170671202286'})
+        self.assertNotIn('course', s.custom_emoji)
+        self.assertEqual(s.custom_emoji['payment'], '5368324170671202286')
 
-    def test_blank_new_values_fall_back_to_old(self):
-        cfg = self.load_config({'TEZCHECK_API_TOKEN': ' ', 'TEZCHECK_API_KEY': 'old',
-            'TEZCHECK_API_BASE_URL': '', 'TEZCHECK_BASE_URL': 'https://old.example.test'})
-        self.assertEqual(cfg.api_key, 'old')
-        self.assertEqual(cfg.base_url, 'https://old.example.test')
-
-    def test_missing_api_token(self):
-        with self.assertRaisesRegex(ValueError, 'TEZCHECK_API_TOKEN'):
-            self.load_config({})
-
-    def test_brand_and_support(self):
-        cfg = self.load_config({'TEZCHECK_API_TOKEN': 'key', 'BRAND_NAME': 'Test maktab', 'SUPPORT_USERNAME': '@test_support'})
-        self.assertEqual(cfg.brand, 'Test maktab')
-        self.assertEqual(cfg.support_username, 'test_support')
-
-    def test_invalid_support_url_is_rejected(self):
-        with self.assertRaisesRegex(ValueError, 'SUPPORT_USERNAME'):
-            self.load_config({'TEZCHECK_API_TOKEN': 'key', 'SUPPORT_USERNAME': 'https://example.test'})
+    def test_language_and_ranges(self):
+        self.assertEqual(load_settings({**BASE, 'DEFAULT_LANGUAGE': 'RU'}).default_language, 'ru')
+        for key, value in (('DEFAULT_LANGUAGE', 'en'), ('WEBHOOK_PORT', '70000'), ('PAYMENT_CHECK_INTERVAL', '5'),
+                           ('INVITE_LINK_TTL_HOURS', '0'), ('SUPPORT_USERNAME', 'a b')):
+            with self.subTest(key=key), self.assertRaises(ConfigError):
+                load_settings({**BASE, key: value})
 
 
 if __name__ == '__main__':

@@ -1,4 +1,7 @@
+# Python 3.11+ uchun sinovdan o‘tgan, bir-biriga mos versiyalar
 aiogram==3.29.0
-pymongo==4.13.2
-dnspython==2.7.0
+aiosqlite==0.21.0
 python-dotenv==1.1.1
+starlette==0.48.0
+uvicorn==0.37.0
+# aiohttp aiogram bilan birga o‘rnatiladi (Tezcheck mijozi uchun ham ishlatiladi)
