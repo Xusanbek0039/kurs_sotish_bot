@@ -123,7 +123,7 @@ async def run(settings: Settings) -> None:
         log.info('Yakunlanmagan %s ta havola yuborish qayta navbatga qo‘yildi', reset)
 
     bot = Bot(settings.bot_token, default=DefaultBotProperties(parse_mode='HTML', link_preview_is_disabled=True))
-    bot.session.middleware(EmojiFallbackMiddleware())
+    bot.session.middleware(EmojiFallbackMiddleware(settings.emoji_map))
     api = TezcheckClient(settings.tezcheck_base_url, settings.tezcheck_api_key, settings.tezcheck_cash_desk_code)
     payments = PaymentService(db, api, bot, settings)
     stop = asyncio.Event()

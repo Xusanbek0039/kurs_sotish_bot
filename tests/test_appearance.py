@@ -69,6 +69,15 @@ class AppearanceTests(unittest.IsolatedAsyncioTestCase):
         await self._press(ADMIN_ID, AdminCb(action='appset', arg='emoji_course').pack())
         self.assertEqual(self.settings.custom_emoji['course'], '5368324170671202286')
 
+    async def test_custom_emoji_everywhere(self):
+        await self._send(ADMIN_ID, text='👇', entities=[MessageEntity(type='custom_emoji', offset=0, length=2,
+                                                                     custom_emoji_id='5470177992950946662')])
+        await self._press(ADMIN_ID, AdminCb(action='appset', arg='emap').pack())
+        self.assertEqual(self.settings.emoji_map, {'👇': '5470177992950946662'})
+        self.assertEqual((await self.db.app_settings())['emap_👇'], '5470177992950946662')
+        await self._press(ADMIN_ID, AdminCb(action='appclr', arg='emap_👇').pack())
+        self.assertEqual(self.settings.emoji_map, {})
+
     async def test_clear_removes_value(self):
         await self._send(ADMIN_ID, sticker=self._sticker())
         await self._press(ADMIN_ID, AdminCb(action='appset', arg='sticker_success').pack())

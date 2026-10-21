@@ -317,6 +317,8 @@ TEXTS: dict[str, dict[str, str]] = {
         'appear_cleared': '🗑 O‘chirildi: {name}',
         'appear_expired': 'Stiker yoki emojini qaytadan yuboring.',
         'btn_appear_clear': '🗑 {name} — o‘chirish',
+        'appear_name_emap': '🔁 Hamma joyda {emoji}',
+        'btn_appear_everywhere': '🔁 Hamma joyda {emoji} o‘rniga shu',
 
         # tekshiruv natijalari (admin)
         'result_paid': '✅ to‘langan',
@@ -625,6 +627,8 @@ TEXTS: dict[str, dict[str, str]] = {
         'appear_cleared': '🗑 Удалено: {name}',
         'appear_expired': 'Отправьте стикер или эмодзи заново.',
         'btn_appear_clear': '🗑 {name} — удалить',
+        'appear_name_emap': '🔁 Везде {emoji}',
+        'btn_appear_everywhere': '🔁 Заменить {emoji} везде',
 
         'result_paid': '✅ оплачен',
         'result_pending': '⏳ ещё не оплачен',

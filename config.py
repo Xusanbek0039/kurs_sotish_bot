@@ -40,6 +40,7 @@ class Settings:
     # Ikkalasi ham o‘zgaruvchan lug‘at: admin botga stiker/emoji yuborib, ularni ish paytida almashtiradi.
     custom_emoji: dict[str, str] = field(default_factory=dict)     # course | payment | success
     stickers: dict[str, str] = field(default_factory=dict)         # welcome | success
+    emoji_map: dict[str, str] = field(default_factory=dict)        # oddiy emoji → custom emoji ID (hamma joyda)
     card_number: str = ''         # bo‘sh bo‘lsa, karta + chek orqali to‘lov o‘chiq
     card_holder: str = ''
 

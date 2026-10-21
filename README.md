@@ -18,7 +18,8 @@ narx, kanal `chat_id`ni tahrirlash · faol/nofaol qilish · tasdiq bilan o‘chi
 **🔗 xarid havolasi** · kanal huquqlarini tekshirish · buyurtmalar (holat va kurs bo‘yicha filtr) · Tezcheck’da
 qo‘lda tekshirish · havolani qayta yuborish · qidiruv (foydalanuvchi ID, buyurtma ID, @username, ism) ·
 👥 foydalanuvchilar (faollik statistikasi, filtrlar, saralash, profil, bloklash, CSV eksport) · statistika ·
-yuborilmagan havolalar · admin amallari tarixi.
+yuborilmagan havolalar · admin amallari tarixi · **🎨 Bezak** — botga stiker yoki custom emoji yuborsangiz,
+bot ID’ni o‘zi aniqlaydi va “qayerga qo‘yamiz?” deb so‘raydi (`.env`siz, qayta ishga tushirishsiz; `/bezak`).
 
 ## Kurs havolalari (deep link)
 

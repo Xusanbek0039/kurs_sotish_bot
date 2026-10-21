@@ -41,9 +41,19 @@ APPEARANCE = {
 }
 
 
+EMOJI_MAP_PREFIX = 'emap_'      # app_settings kaliti: emap_👇 → custom emoji ID
+
+
 def apply_appearance(settings, overrides: dict[str, str]) -> None:
     """Bazadagi qiymatlarni ishlayotgan sozlamalarga qo‘llaydi (bo‘sh qiymat — o‘chirish)."""
     for key, value in overrides.items():
+        if key.startswith(EMOJI_MAP_PREFIX) and len(key) > len(EMOJI_MAP_PREFIX):
+            plain = key[len(EMOJI_MAP_PREFIX):]
+            if value:
+                settings.emoji_map[plain] = value
+            else:
+                settings.emoji_map.pop(plain, None)
+            continue
         if key not in APPEARANCE:
             continue
         attr, name = APPEARANCE[key]
@@ -82,10 +92,72 @@ def user_label(user: dict) -> str:
     return f'{name} (@{h(user["username"])})' if user.get('username') else name
 
 
+def _html_mode(method) -> bool:
+    mode = method.parse_mode            # str, None yoki bot standarti (HTML) uchun Default obyekti
+    return mode is not None and (not isinstance(mode, str) or mode.upper() == 'HTML') and not method.entities
+
+
+def map_emoji_text(text: str, emoji_map: dict[str, str]) -> str:
+    """Oddiy emojilarni `<tg-emoji>` bilan almashtiradi; mavjud `<tg-emoji>` bloklariga tegmaydi."""
+    parts = re.split(r'(<tg-emoji emoji-id="\d+">.*?</tg-emoji>)', text, flags=re.S)
+    ordered = sorted(emoji_map.items(), key=lambda kv: -len(kv[0]))     # uzunroq ketma-ketlik avval (❤️ > ❤)
+    for i, (plain, _) in enumerate(ordered):
+        # Avval vaqtinchalik belgi: keyingi (qisqaroq) emoji allaqachon qo‘yilgan tegning ichiga tushmasin.
+        parts = [p if p.startswith('<tg-emoji') else p.replace(plain, f'\0{i}\0') for p in parts]
+    text = ''.join(parts)
+    for i, (plain, emoji_id) in enumerate(ordered):
+        text = text.replace(f'\0{i}\0', f'<tg-emoji emoji-id="{emoji_id}">{plain}</tg-emoji>')
+    return text
+
+
+def map_emoji_markup(markup, emoji_map: dict[str, str]):
+    """Inline tugma matni moslangan emoji bilan boshlansa, uni tugma ikonkasiga aylantiradi."""
+    if not getattr(markup, 'inline_keyboard', None):
+        return markup
+    changed, rows = False, []
+    for row in markup.inline_keyboard:
+        new_row = []
+        for b in row:
+            if not b.icon_custom_emoji_id:
+                for plain, emoji_id in emoji_map.items():
+                    if b.text.startswith(plain + ' '):
+                        b = b.model_copy(update={'text': b.text[len(plain) + 1:], 'icon_custom_emoji_id': emoji_id})
+                        changed = True
+                        break
+            new_row.append(b)
+        rows.append(new_row)
+    return markup.model_copy(update={'inline_keyboard': rows}) if changed else markup
+
+
 class EmojiFallbackMiddleware(BaseRequestMiddleware):
-    """Custom emoji ID noto‘g‘ri bo‘lsa, xabar oddiy emoji bilan qayta yuboriladi."""
+    """Bot xabarlariga custom emoji qo‘yadi; Telegram rad etsa, xabar oddiy emoji bilan qayta yuboriladi.
+
+    emoji_map: {'👇': '5470…'} — admin “🎨 Bezak” bo‘limidan to‘ldiradi (ish paytida o‘zgaradigan lug‘at).
+    """
+
+    def __init__(self, emoji_map: dict[str, str] | None = None):
+        self.emoji_map = emoji_map if emoji_map is not None else {}
 
     async def __call__(self, make_request, bot, method):
+        if self.emoji_map and isinstance(method, (SendMessage, EditMessageText)) and _html_mode(method):
+            update = {}
+            if isinstance(method.text, str):
+                mapped = map_emoji_text(method.text, self.emoji_map)
+                if mapped != method.text:
+                    update['text'] = mapped
+            markup = getattr(method, 'reply_markup', None)
+            mapped_markup = map_emoji_markup(markup, self.emoji_map)
+            if mapped_markup is not markup:
+                update['reply_markup'] = mapped_markup
+            if update:
+                try:
+                    return await make_request(bot, method.model_copy(update=update))
+                except TelegramBadRequest:
+                    pass   # Telegram custom emoji’ni qabul qilmadi — asl xabar bilan pastda davom etamiz
+        return await self._send_with_fallback(make_request, bot, method)
+
+    @staticmethod
+    async def _send_with_fallback(make_request, bot, method):
         try:
             return await make_request(bot, method)
         except TelegramBadRequest:
