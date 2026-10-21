@@ -294,15 +294,22 @@ class Shop:
             return
         if p['status'] == 'joined':
             if repeat:
-                await self.bot.send_message(o['user_id'], 'Siz ushbu kursni xarid qilgansiz va kanalga kirgansiz.')
+                channel = str(o['channel_chat_id'])
+                items = [('📚 Kurs kanalini ochish', 'https://t.me/c/' + channel[4:] + '/1')] if channel.startswith('-100') else []
+                await self.bot.send_message(o['user_id'], f'🎓 <b>{escape(o["title"])}</b>\n\n'
+                    'Ushbu kurs sizniki — xaridingiz saqlangan. Kanalni ochib o‘rganishni davom ettiring. '
+                    'Kanaldan chiqib ketgan bo‘lsangiz, yordam bo‘limiga murojaat qiling.',
+                    reply_markup=keyboard(items + self.support_items() + self.navigation()))
             return
         if p['status'] in ('creating', 'error'):
             if repeat:
-                await self.bot.send_message(o['user_id'], 'To‘lov tasdiqlangan. Kanalga kirish uchun /id orqali IDingizni olib, adminga murojaat qiling.')
+                await self.bot.send_message(o['user_id'], f'To‘lov tasdiqlangan. Buyurtma #{o["id"]}. Kanalga kirish uchun yordam bo‘limiga yozing.',
+                    reply_markup=keyboard(self.support_items() + [('❓ Yordam', 'u:help:0')]))
             return
         if p['invite_link'] and p['expires_at'] <= int(time.time()):
             if repeat:
-                await self.bot.send_message(o['user_id'], 'Xaridingiz saqlangan. Havola muddati tugagan; adminga murojaat qiling.')
+                await self.bot.send_message(o['user_id'], f'Xaridingiz saqlangan. Havola muddati tugagan; buyurtma #{o["id"]} bilan yordam bo‘limiga yozing.',
+                    reply_markup=keyboard(self.support_items() + [('❓ Yordam', 'u:help:0')]))
             return
         if not p['invite_link']:
             # Persist before Telegram call: a crash must never trigger a second invite automatically.
@@ -323,8 +330,13 @@ class Shop:
                     await self.bot.send_message(o['user_id'], 'To‘lov tasdiqlandi. Kanalga kirish uchun adminga murojaat qiling. Buyurtma #' + str(o['id']))
                 return
         if repeat or not p['notified']:
-            await self.bot.send_message(o['user_id'], '✅ Kurs xarid qilingan. Havolani ochib kirish so‘rovini yuboring. Faqat sizning IDingiz tasdiqlanadi.',
-                                        reply_markup=keyboard([('🔐 Kurs kanaliga kirish', p['invite_link'])]))
+            await self.bot.send_message(o['user_id'], f'🎉 <b>Xaridingiz tasdiqlandi!</b>\n\n'
+                f'📚 {escape(o["title"])}\n🧾 Buyurtma #{o["id"]}\n\n'
+                'Keyingi qadam: quyidagi tugmani bosing va kanalga kirish so‘rovini yuboring. '
+                'Bot aynan sizning so‘rovingizni tasdiqlaydi.\n\n'
+                f'Havola muddati (UTC): {datetime.fromtimestamp(p["expires_at"], timezone.utc).strftime("%d.%m.%Y %H:%M")}. '
+                'Xaridingizni «Mening xaridlarim» bo‘limidan ham topasiz.',
+                reply_markup=keyboard([('🔐 O‘rganishni boshlash', p['invite_link'])] + self.support_items() + [('🎓 Mening xaridlarim', 'u:mine:0')]))
             await self.db.update('purchases', {'id': p['id']}, {'notified': 1})
 
     async def join(self, request):
@@ -357,7 +369,8 @@ class Shop:
         await self.db.audit(uid, 'menu', {})
         await message.answer('⚙️ Admin panel', reply_markup=keyboard([
             ('➕ Kurs qo‘shish', 'a:add'), ('📚 Kurslar', 'a:list:0'),
-            ('🧾 Buyurtmalar va to‘lovlar', 'a:orders:0'), ('📊 Statistika', 'a:stats')]))
+            ('🧾 Buyurtmalar va to‘lovlar', 'a:orders:0'), ('📊 Statistika', 'a:stats'),
+            ('📈 Sotuv bosqichlari', 'a:funnel'), ('🛍 Xaridor ko‘rinishi', 'u:catalog:0')]))
 
     async def admin_callback(self, call, state: FSMContext):
         if call.from_user.id not in self.cfg.admins or call.message.chat.type != 'private':
@@ -397,6 +410,21 @@ class Shop:
         elif action == 'stats':
             o = await self.db.stats()
             await call.message.answer(f'Kurslar: {o["courses"]}\nBuyurtmalar: {o["n"]}\nMuvaffaqiyatli to‘lovlar: {o["paid"]}\nTushum (yalpi): {money(o["revenue"])}')
+        elif action == 'funnel':
+            stages, conversion = await self.db.funnel_report()
+            views = conversion['views']
+            buyers = conversion['buyers']
+            percentage = f'{buyers / views * 100:.1f}%' if views else 'hali ma’lumot yo‘q'
+            await call.message.answer('<b>📈 Sotuv bosqichlari</b>\n\n'
+                f'Botni ochgan foydalanuvchilar: {stages.get("start", {}).get("unique", 0)}\n'
+                f'Kursni ko‘rgan foydalanuvchi/kurs juftliklari: {views}\n'
+                f'Xaridni boshlagan juftliklar: {stages.get("checkout", {}).get("unique", 0)}\n'
+                f'Ko‘rganlar orasida to‘lagan juftliklar: {buyers}\n'
+                f'Ko‘rish → xarid: {percentage}\n\n'
+                'Takroriy bosishlar bitta foydalanuvchi/kurs sifatida hisoblanadi. '
+                'Admin harakatlari kiritilmaydi. Hisob ushbu funksiya yoqilgandan beri yig‘iladi.\n\n'
+                'Ko‘rish ko‘p, xarid kam bo‘lsa: kurs kimga mosligi, o‘quv natijalari va demo darsini aniqlashtiring.',
+                reply_markup=keyboard([('📚 Kurslarni sozlash', 'a:list:0'), ('⚙️ Admin panel', 'a:menu')]))
         elif action == 'save':
             if await state.get_state() != CourseForm.confirm.state:
                 await call.message.answer('Kiritish muddati tugagan. /admin orqali qayta boshlang.')
@@ -409,7 +437,8 @@ class Shop:
                 await self.db.course_change(uid, 'add', {'name': d['name'], 'description': d['description'],
                     'price': d['price'], 'channel_chat_id': d['channel']})
             await state.clear()
-            await call.message.answer('✅ Kurs saqlandi.')
+            await call.message.answer('✅ Kurs saqlandi. Endi kimlar uchunligi, o‘quv natijalari va tanishuv darsini qo‘shib, kurs sahifasini kuchaytiring.',
+                reply_markup=keyboard([('📚 Kurslar', 'a:list:0'), ('⚙️ Admin panel', 'a:menu')]))
         elif len(bits) >= 3:
             cid = int(bits[2])
             c = await self.db.one('courses', {'id': cid, 'deleted': 0})
@@ -418,7 +447,40 @@ class Shop:
                 return
             if action == 'course':
                 await call.message.answer(f'#{cid} <b>{escape(c["name"])}</b>\n{escape(c["description"])}\n{money(c["price"])}\nKanal: <code>{c["channel_chat_id"]}</code>\nHolat: {"faol" if c["active"] else "nofaol"}\nhttps://t.me/{self.username}?start=course_{cid}',
-                    reply_markup=keyboard([('✏️ Tahrirlash', f'a:edit:{cid}'), ('🔄 Faol/nofaol', f'a:toggle:{cid}'), ('🗑 O‘chirish', f'a:delete:{cid}')]))
+                    reply_markup=keyboard([('✏️ Asosiy ma’lumotlar', f'a:edit:{cid}'), ('🎯 Sotuv sahifasini sozlash', f'a:marketing:{cid}'),
+                        ('👀 Xaridor ko‘rinishi', f'a:preview:{cid}'), ('📣 Reklama uchun matn', f'a:post:{cid}'),
+                        ('🔄 Faol/nofaol', f'a:toggle:{cid}'), ('🗑 O‘chirish', f'a:delete:{cid}'), ('📚 Kurslar', 'a:list:0')]))
+            elif action == 'marketing':
+                await state.clear()
+                items = [(f'{"✅" if c.get(field) else "➕"} {title}', f'a:field:{cid}:{field}')
+                         for field, (title, _) in MARKETING_FIELDS.items()]
+                await call.message.answer('<b>🎯 Xaridorga qaror qilishda yordam bering</b>\n\n'
+                    'Kurs kimga mosligini, o‘quvchi nimalarni o‘rganishini va darslar formatini aniq yozing. '
+                    'Bepul tanishuv darsi ishonchni oshirishga yordam beradi.\n\n'
+                    'Faqat kursda haqiqatdan mavjud ma’lumotlarni kiriting. Maydonni tanlang:',
+                    reply_markup=keyboard(items + [('👀 Ko‘rib chiqish', f'a:preview:{cid}'), ('⬅️ Kursga qaytish', f'a:course:{cid}')]))
+            elif action == 'field':
+                field = bits[3] if len(bits) == 4 else ''
+                if field not in MARKETING_FIELDS:
+                    await call.message.answer('Maydon topilmadi.')
+                    return
+                await state.clear()
+                await state.update_data(course_id=cid, field=field)
+                await state.set_state(MarketingForm.value)
+                title, maximum = MARKETING_FIELDS[field]
+                await call.message.answer(f'<b>{title}</b>\n\nHozirgi qiymat:\n{escape(c.get(field) or "Kiritilmagan")}\n\n'
+                    f'Yangi qiymatni yuboring (1–{maximum} belgi). Tozalash: <code>-</code>. Bekor qilish: /cancel.\n'
+                    + ('Faqat ochiq demo dars HTTPS havolasini kiriting. Pullik kanal taklifini qo‘ymang.' if field == 'preview_url'
+                       else 'Har bir fikrni yangi qatordan yozishingiz mumkin. Aniq va haqqoniy ma’lumot kiriting.'))
+            elif action == 'preview':
+                await call.message.answer(course_card(c), reply_markup=keyboard([
+                    ('📖 Dastur', f'a:program:{cid}'), ('⬅️ Sozlashga qaytish', f'a:marketing:{cid}')]))
+            elif action == 'program':
+                await call.message.answer(course_details(c), reply_markup=keyboard([('⬅️ Ko‘rinishga qaytish', f'a:preview:{cid}')]))
+            elif action == 'post':
+                await call.message.answer('Quyidagi matnni reklama kanalingiz uchun nusxalashingiz mumkin. Kurs havolasi xaridorni shu kursga olib keladi.')
+                await call.message.answer(course_card(c) + '\n\n👉 Kurs haqida va xarid:\n' + course_link(self.username, cid),
+                    reply_markup=keyboard([('📤 Kurs havolasini ulashish', share_link(self.username, c)), ('⬅️ Kursga qaytish', f'a:course:{cid}')]))
             elif action == 'edit':
                 await state.clear()
                 await state.update_data(edit_id=cid)
@@ -445,7 +507,8 @@ class Shop:
                 return
             await state.update_data(name=text)
             await state.set_state(CourseForm.description)
-            await message.answer('Tavsifni kiriting (1–2000 belgi).')
+            await message.answer('Tavsifni kiriting (1–2000 belgi).\n\nMaslahat: kurs qaysi muammoni yechishini va o‘quvchi nimani o‘rganishini aniq ayting. '
+                                 'Asossiz daromad va’dalari bermang. Dastur va kimlar uchunligini keyin alohida qo‘shishingiz mumkin.')
         elif current == CourseForm.description.state:
             if not 1 <= len(text) <= 2000:
                 await message.answer('Tavsif 1–2000 belgi bo‘lsin.')
@@ -478,6 +541,21 @@ class Shop:
         else:
             await message.answer('Tasdiqlash tugmasini bosing yoki /cancel yuboring.')
         await self.db.audit(message.from_user.id, 'form', {'state': current})
+
+    async def marketing_form(self, message, state: FSMContext):
+        if message.from_user.id not in self.cfg.admins or message.chat.type != 'private':
+            return
+        data = await state.get_data()
+        field, cid = data.get('field'), data.get('course_id')
+        try:
+            text = validate_marketing(field, (message.text or '').strip())
+            await self.db.course_change(message.from_user.id, 'edit', {field: text}, cid=cid)
+        except ValueError as exc:
+            await message.answer(escape(str(exc)))
+            return
+        await state.clear()
+        await message.answer('✅ Sotuv sahifasi yangilandi.', reply_markup=keyboard([
+            ('🎯 Boshqa maydonlar', f'a:marketing:{cid}'), ('👀 Natijani ko‘rish', f'a:preview:{cid}')]))
 
     async def health(self, message):
         if message.from_user.id not in self.cfg.admins or message.chat.type != 'private':
@@ -529,11 +607,15 @@ async def main():
         await db.update('purchases', {'status': 'creating'}, {'status': 'error'}, many=True)
         shop = Shop(cfg, db, api, bot)
         shop.username = (await bot.get_me()).username
-        await bot.set_my_commands([BotCommand(command='start', description='Kurslar'), BotCommand(command='id', description='Telegram ID')])
+        public_commands = [BotCommand(command='start', description='Bosh sahifa'),
+            BotCommand(command='courses', description='Kurslarni tanlash'),
+            BotCommand(command='purchases', description='Mening xaridlarim'),
+            BotCommand(command='help', description='Savollar va yordam'), BotCommand(command='id', description='Telegram ID')]
+        await bot.set_my_commands(public_commands)
         for admin in cfg.admins:
             with contextlib.suppress(TelegramAPIError):
-                await bot.set_my_commands([BotCommand(command='start', description='Kurslar'), BotCommand(command='admin', description='Admin panel'),
-                    BotCommand(command='health', description='Ulanishni tekshirish'), BotCommand(command='id', description='Telegram ID')], scope=BotCommandScopeChat(chat_id=admin))
+                await bot.set_my_commands(public_commands + [BotCommand(command='admin', description='Admin panel'),
+                    BotCommand(command='health', description='Ulanishni tekshirish')], scope=BotCommandScopeChat(chat_id=admin))
         dp = Dispatcher()
         dp.include_router(shop.router)
         task = asyncio.create_task(shop.poll())

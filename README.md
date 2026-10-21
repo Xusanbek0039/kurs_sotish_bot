@@ -10,11 +10,15 @@ kurs_sotish_bot/
   config.py                .env konfiguratsiyasi
   database.py              MongoDB kolleksiyalari, indekslar va tranzaksiyalar
   tezcheck.py               Merchant API mijozi
+  marketing.py              kurs taqdimoti, reklama havolalari va matnlar
   requirements.txt
   .env.example
   .gitignore
   README.md
   tests/test_payments.py
+  tests/test_config.py
+  tests/test_marketing.py
+  MARKETING_GUIDE.md        kurs sotuvini sozlash bo‘yicha amaliy yo‘riqnoma
   FULL_CODE.md             barcha fayllar kodining birlashtirilgan nusxasi
 ```
 
@@ -26,7 +30,7 @@ Python 3.11 yoki yangiroq versiyani python.org saytidan o‘rnating va PATH belg
 py -m venv .venv
 .\.venv\Scripts\Activate.ps1
 python -m pip install -r requirements.txt
-Copy-Item .env.example .env
+if (-not (Test-Path .env)) { Copy-Item .env.example .env }
 notepad .env
 python main.py
 ```
@@ -46,7 +50,7 @@ Python 3.11+ va distributivingizdagi Python venv paketini o‘rnating.
 python3 -m venv .venv
 source .venv/bin/activate
 python -m pip install -r requirements.txt
-cp .env.example .env
+[ -f .env ] || cp .env.example .env
 nano .env
 python main.py
 ```
@@ -55,14 +59,25 @@ python main.py
 
 - `BOT_TOKEN`: Telegramdagi rasmiy @BotFather orqali `/newbot` bilan yarating.
 - `ADMIN_IDS`: adminlarning raqamli Telegram IDlari, vergul bilan. Botdagi `/id` o‘z IDingizni ko‘rsatadi. Username yozmang.
-- `TEZCHECK_API_KEY`: Tezcheck savdogar kabinetida API kalit yarating.
+- `TEZCHECK_API_TOKEN`: Tezcheck savdogar kabinetida API kalit yarating.
 - `TEZCHECK_CASH_DESK_CODE`: kabinetdagi kassa kodi; bu kassa IDsi emas.
-- `TEZCHECK_BASE_URL`: namunadagi rasmiy HTTPS manzil.
+- `TEZCHECK_API_BASE_URL`: namunadagi rasmiy HTTPS manzil.
 - `MONGODB_URI`: Atlas kabinetidagi Connect → Drivers bo‘limidan olingan maxfiy ulanish manzili.
 - `MONGODB_DATABASE`: baza nomi, odatda `kurs_sotish_bot`.
 - `POLL_INTERVAL`: tekshirishlar orasidagi soniyalar, kamida 30.
 - `INVITE_TTL_HOURS`: kirish havolasi muddati, 1–168 soat.
 - `CUSTOM_EMOJI_ID`: ixtiyoriy haqiqiy Telegram custom emoji IDsi. Bo‘sh bo‘lsa oddiy emoji ishlaydi. Telegram hisob/bot cheklovlariga qarab custom emoji oddiy emoji sifatida ko‘rinishi mumkin.
+- `BRAND_NAME`: bosh sahifada ko‘rinadigan maktab/brend nomi, 80 belgigacha.
+- `WELCOME_TEXT`: salomlashuvdan keyingi tanishtiruv, 600 belgigacha.
+- `SUPPORT_USERNAME`: yordam beradigan haqiqiy Telegram username, masalan `@kurs_yordam`. Bo‘sh bo‘lsa shaxsiy yozish tugmasi ko‘rsatilmaydi; yordam bo‘limi ishlaydi.
+
+Eski `TEZCHECK_API_KEY` va `TEZCHECK_BASE_URL` nomlari ham ishlaydi. Yangi va eski nom bir vaqtda to‘ldirilsa, `TEZCHECK_API_TOKEN` va `TEZCHECK_API_BASE_URL` ustun turadi. Yangi nom bo‘sh bo‘lsa, eski qiymat ishlatiladi. `.env`dagi boshqa kalitlarni o‘chirish yoki qayta yozish shart emas.
+
+```dotenv
+TEZCHECK_API_BASE_URL=https://api.tezcheck.uz/api/merchant/v1
+TEZCHECK_API_TOKEN=
+TEZCHECK_CASH_DESK_CODE=
+```
 
 `.env` va MongoDB ulanish manzilini oshkor qilmang. Loglarda token, MongoDB URI, API javobi va to‘lov/taklif URLlari chiqarilmaydi.
 

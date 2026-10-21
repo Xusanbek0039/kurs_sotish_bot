@@ -1,5 +1,6 @@
 .env
 .venv/
+.test-runtime/
 __pycache__/
 *.db
 *.db-shm
