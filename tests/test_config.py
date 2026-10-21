@@ -16,26 +16,18 @@ class ConfigTests(unittest.TestCase):
         self.assertEqual(s.admin_ids, frozenset({111, 222}))
         self.assertEqual(s.tezcheck_base_url, 'https://api.tezcheck.uz/api/merchant/v1')
         self.assertEqual(s.default_language, 'uz')
-        self.assertEqual(s.webhook_port, 8080)
-        self.assertFalse(s.webhook_enabled)
-        self.assertEqual(s.webhook_url, '')
         self.assertTrue(str(s.database_path).endswith('bot.sqlite3'))
 
     def test_secrets_not_in_repr(self):
-        s = load_settings({**BASE, 'TEZCHECK_WEBHOOK_SECRET': 'wbs_secret_123'})
+        s = load_settings(dict(BASE))
         text = repr(s)
-        for secret in (BASE['BOT_TOKEN'], 'aps_key', 'wbs_secret_123', 'cdk_desk'):
+        for secret in (BASE['BOT_TOKEN'], 'aps_key', 'cdk_desk'):
             self.assertNotIn(secret, text)
-        self.assertIn('wbs_secret_123', s.secrets())
+        self.assertEqual(set(s.secrets()), {BASE['BOT_TOKEN'], 'aps_key'})
 
-    def test_webhook_url_built_from_public_base(self):
-        s = load_settings({**BASE, 'PUBLIC_BASE_URL': 'https://bot.example.uz/', 'TEZCHECK_WEBHOOK_SECRET': 'x'})
-        self.assertEqual(s.webhook_url, 'https://bot.example.uz/webhooks/tezcheck')
-        self.assertTrue(s.webhook_enabled)
-
-    def test_public_url_must_be_https(self):
-        with self.assertRaises(ConfigError):
-            load_settings({**BASE, 'PUBLIC_BASE_URL': 'http://bot.example.uz'})
+    def test_old_webhook_values_are_ignored(self):
+        s = load_settings({**BASE, 'TEZCHECK_WEBHOOK_SECRET': 'x', 'PUBLIC_BASE_URL': 'http://old', 'WEBHOOK_PORT': 'abc'})
+        self.assertFalse(hasattr(s, 'tezcheck_webhook_secret'))
 
     def test_required_values(self):
         for key in BASE:
@@ -62,7 +54,7 @@ class ConfigTests(unittest.TestCase):
 
     def test_language_and_ranges(self):
         self.assertEqual(load_settings({**BASE, 'DEFAULT_LANGUAGE': 'RU'}).default_language, 'ru')
-        for key, value in (('DEFAULT_LANGUAGE', 'en'), ('WEBHOOK_PORT', '70000'), ('PAYMENT_CHECK_INTERVAL', '5'),
+        for key, value in (('DEFAULT_LANGUAGE', 'en'), ('TEZCHECK_BASE_URL', 'http://api.x'), ('PAYMENT_CHECK_INTERVAL', '5'),
                            ('INVITE_LINK_TTL_HOURS', '0'), ('SUPPORT_USERNAME', 'a b')):
             with self.subTest(key=key), self.assertRaises(ConfigError):
                 load_settings({**BASE, key: value})

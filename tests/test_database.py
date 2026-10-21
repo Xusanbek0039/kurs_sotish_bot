@@ -109,12 +109,6 @@ class DatabaseTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(await self.db.reset_stuck_deliveries(), 1)
         self.assertEqual((await self.db.get_purchase(paid.purchase_id))['status'], 'pending_invite')
 
-    async def test_webhook_event_registration(self):
-        self.assertIsNone(await self.db.register_webhook_event('oev_1', 'payment.succeeded', 'whd_1'))
-        self.assertEqual(await self.db.register_webhook_event('oev_1', 'payment.succeeded', 'whd_2'), 'received')
-        await self.db.finish_webhook_event('oev_1', 'processed')
-        self.assertEqual(await self.db.register_webhook_event('oev_1', 'payment.succeeded', 'whd_3'), 'processed')
-
     # ------------------------------------------------------------- foydalanuvchilar
     async def test_users_listing_search_block(self):
         for i in range(25):

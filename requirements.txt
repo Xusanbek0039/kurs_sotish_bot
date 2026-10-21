@@ -2,6 +2,4 @@
 aiogram==3.29.0
 aiosqlite==0.21.0
 python-dotenv==1.1.1
-starlette==0.48.0
-uvicorn==0.37.0
 # aiohttp aiogram bilan birga o‘rnatiladi (Tezcheck mijozi uchun ham ishlatiladi)

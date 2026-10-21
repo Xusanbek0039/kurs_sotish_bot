@@ -1,16 +1,10 @@
 import asyncio
-import json
-import time
 import unittest
-
-import httpx
 
 from database import ts
 from services.payments import PaymentService
 from services.tezcheck import TezcheckError
-from services.webhook import create_app
-from tests.helpers import (ADMIN_ID, CHANNEL_ID, USER_ID, FakeBot, FakeTezcheck, make_db, make_settings, seed,
-                           sign_webhook, webhook_body)
+from tests.helpers import ADMIN_ID, CHANNEL_ID, USER_ID, FakeBot, FakeTezcheck, make_db, make_settings, seed
 
 
 class PaymentFlowTests(unittest.IsolatedAsyncioTestCase):
@@ -163,111 +157,6 @@ class PaymentFlowTests(unittest.IsolatedAsyncioTestCase):
         await self.db.write("UPDATE purchases SET invite_expires_at = '2000-01-01 00:00:00', invite_count = 3")
         self.assertEqual(await self.payments.deliver(purchase['id'], actor='user'), 'limit')
         self.assertEqual(len(self.bot.invites), 1)
-
-
-class WebhookTests(unittest.IsolatedAsyncioTestCase):
-    async def asyncSetUp(self):
-        self.db, self.tmp = await make_db()
-        self.settings = make_settings(self.db.path)
-        self.api, self.bot = FakeTezcheck(), FakeBot()
-        self.payments = PaymentService(self.db, self.api, self.bot, self.settings)
-        self.cid = await seed(self.db)
-        app = create_app(self.settings, self.db, self.payments)
-        self.client = httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url='http://test')
-        self.addAsyncCleanup(self._cleanup)
-        self.order = (await self.payments.checkout(USER_ID, self.cid)).order
-        self.bill_id = self.order['tezcheck_bill_id']
-
-    async def _cleanup(self):
-        await self.client.aclose()
-        await self.payments.shutdown()
-        await self.db.close()
-        self.tmp.cleanup()
-
-    async def post(self, body: bytes, headers: dict):
-        response = await self.client.post(self.settings.webhook_path, content=body, headers=headers)
-        await self.payments.shutdown()        # fondagi havola yuborish tugashini kutamiz
-        return response
-
-    async def test_valid_webhook_marks_paid_once(self):
-        body = webhook_body(self.order, self.bill_id)
-        r1 = await self.post(body, sign_webhook(body, 'whd_1'))
-        self.assertEqual(r1.status_code, 200)
-        self.assertEqual((await self.db.get_order(self.order['id']))['status'], 'paid')
-        # Takroriy yetkazish va operator qayta yuborishi (yangi delivery id, o‘sha tana id).
-        r2 = await self.post(body, sign_webhook(body, 'whd_1'))
-        r3 = await self.post(body, sign_webhook(body, 'whd_2'))
-        self.assertTrue(r2.json()['duplicate'])
-        self.assertTrue(r3.json()['duplicate'])
-        self.assertEqual(len(self.bot.invites), 1)
-        self.assertEqual(len(self.bot.links_sent_to(USER_ID)), 1)
-        self.assertEqual(await self.db.value('SELECT COUNT(*) FROM purchases'), 1)
-        self.assertEqual((await self.db.get_webhook_event('oev_1'))['status'], 'processed')
-
-    async def test_distinct_events_for_same_payment_are_idempotent(self):
-        for n in range(3):
-            body = webhook_body(self.order, self.bill_id, event_id=f'oev_{n}')
-            self.assertEqual((await self.post(body, sign_webhook(body, f'whd_{n}'))).status_code, 200)
-        self.assertEqual(len(self.bot.invites), 1)
-        self.assertEqual(await self.db.value('SELECT COUNT(*) FROM purchases'), 1)
-
-    async def test_bad_signature_is_rejected_and_order_untouched(self):
-        body = webhook_body(self.order, self.bill_id)
-        headers = sign_webhook(body, secret='wbs_wrong_secret')
-        self.assertEqual((await self.post(body, headers)).status_code, 401)
-        tampered = body.replace(b'"live"', b'"live" ')
-        self.assertEqual((await self.post(tampered, sign_webhook(body))).status_code, 401)
-        headers = sign_webhook(body)
-        headers['X-Checkout-Signature'] = headers['X-Checkout-Signature'].replace('v1=', 'v2=')
-        self.assertEqual((await self.post(body, headers)).status_code, 401)
-        self.assertEqual((await self.post(body, {'Content-Type': 'application/json'})).status_code, 401)
-        self.assertEqual((await self.db.get_order(self.order['id']))['status'], 'pending')
-        self.assertIsNone(await self.db.get_webhook_event('oev_1'))
-        self.assertEqual(self.bot.invites, [])
-
-    async def test_stale_timestamp_is_rejected(self):
-        body = webhook_body(self.order, self.bill_id)
-        r = await self.post(body, sign_webhook(body, timestamp=int(time.time()) - 3600))
-        self.assertEqual(r.status_code, 401)
-        self.assertEqual((await self.db.get_order(self.order['id']))['status'], 'pending')
-
-    async def test_rotated_secret_header_with_two_signatures(self):
-        body = webhook_body(self.order, self.bill_id)
-        good = sign_webhook(body)
-        old = sign_webhook(body, secret='wbs_old', timestamp=int(good['X-Checkout-Timestamp']))
-        good['X-Checkout-Signature'] = old['X-Checkout-Signature'] + ',' + good['X-Checkout-Signature']
-        self.assertEqual((await self.post(body, good)).status_code, 200)
-        self.assertEqual((await self.db.get_order(self.order['id']))['status'], 'paid')
-
-    async def test_test_environment_does_not_grant_access(self):
-        body = webhook_body(self.order, self.bill_id, environment='test')
-        self.assertEqual((await self.post(body, sign_webhook(body))).status_code, 200)
-        self.assertEqual((await self.db.get_order(self.order['id']))['status'], 'pending')
-        self.assertEqual((await self.db.get_webhook_event('oev_1'))['status'], 'ignored')
-        self.assertEqual(self.bot.invites, [])
-
-    async def test_wrong_amount_does_not_grant_access(self):
-        body = webhook_body(self.order, self.bill_id, amount=1)
-        self.assertEqual((await self.post(body, sign_webhook(body))).status_code, 200)
-        self.assertEqual((await self.db.get_order(self.order['id']))['status'], 'review')
-        self.assertEqual(self.bot.invites, [])
-
-    async def test_failed_payment_event_is_ignored(self):
-        body = webhook_body(self.order, self.bill_id, event_type='payment.failed')
-        self.assertEqual((await self.post(body, sign_webhook(body))).status_code, 200)
-        self.assertEqual((await self.db.get_order(self.order['id']))['status'], 'pending')
-
-    async def test_unknown_order_and_bad_json(self):
-        body = json.dumps({'id': 'oev_x', 'type': 'payment.succeeded',
-                           'data': {'external_reference': 'ORD-unknown'}}).encode()
-        self.assertEqual((await self.post(body, sign_webhook(body))).status_code, 200)
-        self.assertEqual((await self.db.get_webhook_event('oev_x'))['error'], 'unknown_order')
-        bad = b'{not json'
-        self.assertEqual((await self.post(bad, sign_webhook(bad))).status_code, 400)
-
-    async def test_health_endpoint(self):
-        r = await self.client.get('/health')
-        self.assertEqual(r.json(), {'status': 'ok'})
 
 
 if __name__ == '__main__':

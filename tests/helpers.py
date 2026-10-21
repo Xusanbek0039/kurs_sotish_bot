@@ -1,11 +1,7 @@
 """Testlar uchun soxta (tarmoqsiz) Telegram va Tezcheck. Jonli kodda ishlatilmaydi."""
 from __future__ import annotations
 
-import hashlib
-import hmac
-import json
 import tempfile
-import time
 from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
@@ -21,13 +17,12 @@ from services.tezcheck import BillStatus, CreatedBill, TezcheckError
 
 ADMIN_ID = 1001
 USER_ID = 2002
-WEBHOOK_SECRET = 'wbs_test_secret_value'
 CHANNEL_ID = -1001234567890
 
 
 def make_settings(db_path: Path, **overrides) -> Settings:
     values = dict(bot_token='123456:' + 'A' * 35, admin_ids=frozenset({ADMIN_ID}), tezcheck_api_key='aps_test_key',
-                  tezcheck_cash_desk_code='cdk_test', tezcheck_webhook_secret=WEBHOOK_SECRET,
+                  tezcheck_cash_desk_code='cdk_test',
                   database_path=db_path, payment_check_interval=60)
     values.update(overrides)
     return Settings(**values)
@@ -131,27 +126,6 @@ class FakeBot:
             if chat_id == user_id and markup is not None:
                 out += [b.url for row in markup.inline_keyboard for b in row if b.url and '/+' in b.url]
         return out
-
-
-def sign_webhook(body: bytes, delivery_id: str = 'whd_1', timestamp: int | None = None,
-                 secret: str = WEBHOOK_SECRET) -> dict[str, str]:
-    ts = str(int(time.time()) if timestamp is None else timestamp)
-    signature = hmac.new(secret.encode(), ts.encode() + b'.' + delivery_id.encode() + b'.' + body,
-                         hashlib.sha256).hexdigest()
-    return {'X-Checkout-Timestamp': ts, 'X-Checkout-Delivery': delivery_id,
-            'X-Checkout-Signature': 'v1=' + signature, 'Content-Type': 'application/json'}
-
-
-def webhook_body(order: dict, bill_id: str, event_id: str = 'oev_1', environment: str = 'live',
-                 event_type: str = 'payment.succeeded', amount: int | None = None) -> bytes:
-    return json.dumps({
-        'id': event_id, 'type': event_type, 'schema_version': 1, 'created_at': '2026-10-21T09:04:11+00:00',
-        'mode': 'test',  # hujjat: yuqori darajadagi mode ishonchsiz — data.environment o‘qiladi
-        'data': {'payment_id': 'pay_' + bill_id, 'state': event_type.split('.')[1],
-                 'amount_minor': amount or order['amount_uzs'] * 100, 'currency': 'UZS',
-                 'external_reference': order['external_reference'], 'bill_id': bill_id,
-                 'environment': environment, 'problem': None},
-    }, separators=(',', ':')).encode()
 
 
 class RecordingSession(BaseSession):
