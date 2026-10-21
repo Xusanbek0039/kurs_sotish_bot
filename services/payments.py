@@ -21,7 +21,7 @@ from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 from database import Database, PaidResult, parse_ts, utcnow
 from locales import t
 from services.tezcheck import TezcheckClient, TezcheckError, Verdict, evaluate_bill
-from services.ui import course_name, emoji, h
+from services.ui import TASHKENT, course_name, emoji, h
 
 log = logging.getLogger(__name__)
 
@@ -188,7 +188,6 @@ class PaymentService:
         purchase = await self.db.claim_purchase(purchase_id, statuses)
         if not purchase:
             return 'busy'
-        previous = purchase['status']  # claim’dan oldingi holat emas — tiklash uchun quyida hisoblaymiz
         restore = 'sent' if purchase['invite_sent_at'] else ('link_created' if purchase['invite_link'] else 'pending_invite')
         user_id = purchase['user_id']
         try:
@@ -234,7 +233,7 @@ class PaymentService:
 
             text = t(lang, 'access_granted', emoji=emoji(self.settings, 'success', '🎉'),
                      course=h(course_name(purchase, lang)), order_id=purchase['order_id'],
-                     expires=expires.astimezone(_tz()).strftime('%d.%m.%Y %H:%M'))
+                     expires=expires.astimezone(TASHKENT).strftime('%d.%m.%Y %H:%M'))
             markup = InlineKeyboardMarkup(inline_keyboard=[
                 [InlineKeyboardButton(text=t(lang, 'btn_join_channel'), url=purchase['invite_link'], style='success')]])
             try:
@@ -305,7 +304,3 @@ class PaymentService:
             with contextlib.suppress(asyncio.TimeoutError):
                 await asyncio.wait_for(stop.wait(), timeout=self.settings.payment_check_interval)
 
-
-def _tz():
-    from services.ui import TASHKENT
-    return TASHKENT
